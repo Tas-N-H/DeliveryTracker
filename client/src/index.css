@@ -65,6 +65,7 @@
 /* Leaflet map styles */
 .leaflet-container {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  z-index: 1;
 }
 
 .leaflet-popup-content-wrapper {
@@ -92,4 +93,17 @@
 
 .status-delivered {
   background-color: var(--status-delivered);
+}
+
+/* Ensure dialog appears above map */
+[data-radix-popper-content-wrapper] {
+  z-index: 1000 !important;
+}
+
+[data-radix-dialog-overlay] {
+  z-index: 999 !important;
+}
+
+[data-radix-dialog-content] {
+  z-index: 1001 !important;
 }
