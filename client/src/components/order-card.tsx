@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Phone, Globe } from "lucide-react";
+import { SiUbereats, SiJusteat } from "react-icons/si";
 import type { Order } from "@shared/schema";
 
 interface OrderCardProps {
@@ -94,6 +96,21 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
     }
   };
 
+  const getPlatformIcon = (platform: string) => {
+    switch (platform) {
+      case "uber-eats":
+        return <SiUbereats className="w-4 h-4 text-black" />;
+      case "just-eat":
+        return <SiJusteat className="w-4 h-4 text-orange-500" />;
+      case "website":
+        return <Globe className="w-4 h-4 text-blue-500" />;
+      case "phone":
+        return <Phone className="w-4 h-4 text-green-500" />;
+      default:
+        return <Globe className="w-4 h-4 text-gray-500" />;
+    }
+  };
+
   return (
     <div 
       className={`order-card bg-white rounded-lg shadow-sm border p-4 cursor-pointer transition-all
@@ -104,7 +121,8 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center">
           <span className={`inline-block w-3 h-3 rounded-full mr-2 ${getStatusColor(order.status)}`}></span>
-          <span className="text-xs font-medium text-gray-500">Order #{order.orderNumber}</span>
+          {getPlatformIcon(order.platform)}
+          <span className="text-xs font-medium text-gray-500 ml-2">Order #{order.orderNumber}</span>
         </div>
         <span className="text-xs text-gray-400">{formatTime(order.createdAt)}</span>
       </div>
