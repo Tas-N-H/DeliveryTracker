@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -113,6 +114,9 @@ export function AddOrderModal({ isOpen, onClose, onSuccess }: AddOrderModalProps
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add New Order</DialogTitle>
+          <DialogDescription>
+            Enter the order details to add it to the delivery map
+          </DialogDescription>
         </DialogHeader>
         
         <Form {...form}>

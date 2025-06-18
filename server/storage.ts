@@ -30,8 +30,13 @@ export class MemStorage implements IStorage {
   async createOrder(insertOrder: InsertOrder): Promise<Order> {
     const id = this.currentId++;
     const order: Order = {
-      ...insertOrder,
       id,
+      orderNumber: insertOrder.orderNumber,
+      address: insertOrder.address,
+      platform: insertOrder.platform,
+      status: insertOrder.status || "pending",
+      latitude: insertOrder.latitude ?? null,
+      longitude: insertOrder.longitude ?? null,
       createdAt: new Date(),
     };
     this.orders.set(id, order);
