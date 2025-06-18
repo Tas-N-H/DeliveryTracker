@@ -33,7 +33,13 @@ import { useToast } from "@/hooks/use-toast";
 import { insertOrderSchema } from "@shared/schema";
 
 const formSchema = insertOrderSchema.extend({
-  address: z.string().min(10, "Please enter a complete address with postcode"),
+  address: z.string()
+    .min(10, "Please enter a complete address with postcode")
+    .refine((addr) => {
+      // Check if address contains a UK postcode pattern
+      const postcodeMatch = addr.match(/([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][ABD-HJLNP-UW-Z]{2})/i);
+      return postcodeMatch !== null;
+    }, "Address must include a valid UK postcode (e.g., ME4 4EZ)"),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -146,7 +152,7 @@ export function AddOrderModal({ isOpen, onClose, onSuccess }: AddOrderModalProps
                   <FormLabel>Delivery Address</FormLabel>
                   <FormControl>
                     <Textarea 
-                      placeholder="Enter full address with postcode (e.g., 123 High Street, Chatham, ME4 4EZ)"
+                      placeholder="Enter full address with postcode (e.g., 276 Hawthorn Road, Strood, Kent ME2 2HU)"
                       rows={3}
                       {...field}
                     />
