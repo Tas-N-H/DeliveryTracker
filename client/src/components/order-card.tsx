@@ -46,6 +46,7 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders/delivered/today"] });
       onRefetch();
       toast({
         title: "Order Delivered",
