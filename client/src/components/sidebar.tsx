@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { OrderCard } from "@/components/order-card";
-import { Plus, Camera, BarChart3 } from "lucide-react";
+import { ReceiptScanner } from "@/components/receipt-scanner";
+import { Plus, BarChart3 } from "lucide-react";
 import type { Order } from "@shared/schema";
 
 interface SidebarProps {
@@ -121,19 +122,9 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Receipt Scanner Button */}
+      {/* Receipt Scanner */}
       <div className="p-4 border-t border-gray-200">
-        <Button 
-          variant="outline"
-          className="w-full"
-          onClick={() => {
-            // TODO: Implement receipt scanning functionality
-            console.log("Receipt scanning not yet implemented");
-          }}
-        >
-          <Camera className="w-4 h-4 mr-2" />
-          Scan Receipt
-        </Button>
+        <ReceiptScanner onOrderCreated={onRefetch} />
       </div>
     </div>
   );
