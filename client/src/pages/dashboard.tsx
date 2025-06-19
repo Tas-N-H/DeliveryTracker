@@ -19,12 +19,16 @@ export default function Dashboard() {
   
   // Count orders by status
   const pendingCount = activeOrders.filter(order => order.status === "pending").length;
+  const preparingCount = activeOrders.filter(order => order.status === "preparing").length;
+  const cookingCount = activeOrders.filter(order => order.status === "cooking").length;
+  const readyCount = activeOrders.filter(order => order.status === "ready").length;
   const transitCount = activeOrders.filter(order => order.status === "in-transit").length;
-  const deliveredToday = orders.filter(order => {
-    const today = new Date().toDateString();
-    const orderDate = new Date(order.createdAt).toDateString();
-    return order.status === "delivered" && orderDate === today;
-  }).length;
+
+  // Get today's delivered orders count
+  const { data: deliveredOrdersData = [] } = useQuery<any[]>({
+    queryKey: ["/api/orders/delivered/today"],
+  });
+  const deliveredToday = deliveredOrdersData.length;
 
   useEffect(() => {
     document.title = "Delivery Manager - Takeaway Order Tracking";
@@ -57,6 +61,9 @@ export default function Dashboard() {
         <Sidebar
           orders={activeOrders}
           pendingCount={pendingCount}
+          preparingCount={preparingCount}
+          cookingCount={cookingCount}
+          readyCount={readyCount}
           transitCount={transitCount}
           deliveredCount={deliveredToday}
           selectedOrderId={selectedOrderId}

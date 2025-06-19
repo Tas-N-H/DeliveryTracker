@@ -78,7 +78,17 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
         const lat = parseFloat(order.latitude);
         const lng = parseFloat(order.longitude);
 
-        const color = order.status === "pending" ? "#F44336" : "#FF9800";
+        const getMarkerColor = (status: string) => {
+          switch (status) {
+            case "pending": return "#F44336"; // red
+            case "preparing": return "#FFC107"; // yellow
+            case "cooking": return "#FF8F00"; // amber
+            case "ready": return "#2196F3"; // blue
+            case "in-transit": return "#FF9800"; // orange
+            default: return "#9E9E9E"; // gray
+          }
+        };
+        const color = getMarkerColor(order.status);
         const isSelected = selectedOrderId === order.id;
 
         const marker = window.L.circleMarker([lat, lng], {
@@ -156,14 +166,26 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
 
       {/* Map Legend */}
       <div className="absolute bottom-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4">
-        <h3 className="font-semibold text-gray-800 text-sm mb-2">Delivery Status</h3>
-        <div className="space-y-2 text-sm">
+        <h3 className="font-semibold text-gray-800 text-sm mb-2">Order Status</h3>
+        <div className="space-y-1 text-xs">
           <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-red-500 mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
             <span className="text-gray-600">Pending</span>
           </div>
           <div className="flex items-center">
-            <div className="w-4 h-4 rounded-full bg-orange-500 mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
+            <span className="text-gray-600">Preparing</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-3 h-3 rounded-full bg-amber-600 mr-2"></div>
+            <span className="text-gray-600">Cooking</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-3 h-3 rounded-full bg-blue-500 mr-2"></div>
+            <span className="text-gray-600">Ready</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-3 h-3 rounded-full bg-orange-500 mr-2"></div>
             <span className="text-gray-600">In Transit</span>
           </div>
         </div>

@@ -38,7 +38,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const { status } = req.body;
       
-      if (!status || !["pending", "in-transit", "delivered"].includes(status)) {
+      if (!status || !["pending", "preparing", "cooking", "ready", "in-transit", "delivered"].includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
 
@@ -54,11 +54,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete order (mark as delivered)
+  // Mark order as delivered (moves to delivered orders)
   app.delete("/api/orders/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const success = await storage.deleteOrder(id);
+      const success = await storage.markOrderAsDelivered(id);
       
       if (!success) {
         return res.status(404).json({ error: "Order not found" });
@@ -66,8 +66,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(204).send();
     } catch (error) {
-      console.error("Error deleting order:", error);
-      res.status(500).json({ error: "Failed to delete order" });
+      console.error("Error marking order as delivered:", error);
+      res.status(500).json({ error: "Failed to mark order as delivered" });
+    }
+  });
+
+  // Get today's delivered orders
+  app.get("/api/orders/delivered/today", async (req, res) => {
+    try {
+      const deliveredOrders = await storage.getTodaysDeliveredOrders();
+      res.json(deliveredOrders);
+    } catch (error) {
+      console.error("Error fetching delivered orders:", error);
+      res.status(500).json({ error: "Failed to fetch delivered orders" });
+    }
+  });
+
+  // Get all delivered orders
+  app.get("/api/orders/delivered", async (req, res) => {
+    try {
+      const deliveredOrders = await storage.getDeliveredOrders();
+      res.json(deliveredOrders);
+    } catch (error) {
+      console.error("Error fetching delivered orders:", error);
+      res.status(500).json({ error: "Failed to fetch delivered orders" });
     }
   });
 

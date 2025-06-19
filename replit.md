@@ -31,17 +31,24 @@ This is a full-stack web application for managing takeaway delivery orders. It p
 ## Key Components
 
 ### Database Schema
-- **Orders Table**: Stores order information including:
+- **Orders Table**: Stores active order information including:
   - Order number, address, platform (uber-eats, just-eat, website, phone)
-  - Status tracking (pending, in-transit, delivered)
+  - Status tracking (pending, preparing, cooking, ready, in-transit, delivered)
   - Geographic coordinates (latitude, longitude)
   - Timestamps for order creation
+- **Delivered Orders Table**: Stores completed deliveries with:
+  - Copy of order details from original order
+  - Delivery timestamp for daily tracking
+  - Reference to original order ID
+  - Automatic cleanup after 24 hours
 
 ### API Endpoints
-- `GET /api/orders` - Retrieve all orders
+- `GET /api/orders` - Retrieve all active orders
 - `POST /api/orders` - Create new order with validation
-- `PATCH /api/orders/:id/status` - Update order status
-- `DELETE /api/orders/:id` - Mark order as delivered (remove from active tracking)
+- `PATCH /api/orders/:id/status` - Update order status through cooking stages
+- `DELETE /api/orders/:id` - Mark order as delivered (moves to delivered orders)
+- `GET /api/orders/delivered/today` - Get today's delivered orders count
+- `GET /api/orders/delivered` - Get all delivered orders history
 
 ### UI Components
 - **Dashboard**: Main interface with sidebar and map view
@@ -58,9 +65,11 @@ This is a full-stack web application for managing takeaway delivery orders. It p
 ## Data Flow
 
 1. **Order Creation**: User submits order through modal → validation → API creates order → updates in-memory store → refreshes UI
-2. **Status Updates**: User clicks status buttons → API updates order → store updates → UI refreshes with new status
-3. **Map Integration**: Orders with coordinates display as markers → clicking markers selects orders in sidebar
-4. **Real-time Updates**: React Query manages cache invalidation and automatic refetching
+2. **Cooking Workflow**: Orders progress through stages: pending → preparing → cooking → ready → in-transit → delivered
+3. **Status Updates**: User clicks stage buttons → API updates order status → store updates → UI refreshes with new status and map colors
+4. **Delivery Tracking**: When marked delivered → order moves to delivered orders table → daily count updates → automatic cleanup after 24 hours
+5. **Map Integration**: Orders display as colored markers based on cooking stage → clicking markers selects orders in sidebar
+6. **Real-time Updates**: React Query manages cache invalidation and automatic refetching
 
 ## External Dependencies
 
