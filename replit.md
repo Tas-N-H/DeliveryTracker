@@ -1,26 +1,29 @@
-# Delivery Manager - Order Tracking System
+# Delivery Manager - Multi-Tenant Restaurant Order Tracking System
 
 ## Overview
 
-This is a full-stack web application for managing takeaway delivery orders. It provides a real-time dashboard with an interactive map for tracking delivery status and managing orders from various platforms like Uber Eats, Just Eat, and direct orders.
+This is a full-stack web application designed for multiple restaurants to manage their takeaway delivery orders independently. Each restaurant has its own secure account with isolated order data. The system provides a real-time dashboard with an interactive map for tracking delivery status, OCR receipt scanning, and managing orders from various platforms like Uber Eats, Just Eat, and direct orders.
 
 ## System Architecture
 
 ### Frontend Architecture
 - **Framework**: React 18 with TypeScript
+- **Authentication**: JWT-based authentication with React Context
 - **Routing**: Wouter for client-side routing
 - **State Management**: TanStack Query (React Query) for server state
 - **UI Components**: Radix UI primitives with shadcn/ui design system
 - **Styling**: Tailwind CSS with CSS variables for theming
 - **Build Tool**: Vite for development and production builds
 - **Map Integration**: Leaflet.js for interactive mapping
+- **OCR Processing**: Tesseract.js for client-side receipt scanning
 
 ### Backend Architecture
 - **Runtime**: Node.js with TypeScript
 - **Framework**: Express.js for REST API
 - **Database ORM**: Drizzle ORM with PostgreSQL dialect
 - **Database Provider**: Neon Database (serverless PostgreSQL)
-- **Session Management**: PostgreSQL session store
+- **Authentication**: JWT tokens with bcrypt password hashing
+- **Authorization**: Restaurant-scoped data access
 - **Validation**: Zod schemas for type-safe data validation
 
 ### Development Environment
@@ -31,12 +34,17 @@ This is a full-stack web application for managing takeaway delivery orders. It p
 ## Key Components
 
 ### Database Schema
+- **Restaurants Table**: Stores restaurant account information:
+  - Name, email, password (hashed), address, phone
+  - Created timestamp and unique email index
 - **Orders Table**: Stores active order information including:
+  - Restaurant ID (foreign key for multi-tenancy)
   - Order number, address, platform (uber-eats, just-eat, website, phone)
-  - Status tracking (pending, preparing, cooking, ready, in-transit, delivered)
+  - Status tracking (cooking, packed, in-transit, delivered)
   - Geographic coordinates (latitude, longitude)
   - Timestamps for order creation
 - **Delivered Orders Table**: Stores completed deliveries with:
+  - Restaurant ID (foreign key for multi-tenancy)
   - Copy of order details from original order
   - Delivery timestamp for daily tracking
   - Reference to original order ID

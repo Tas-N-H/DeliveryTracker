@@ -1,14 +1,88 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertOrderSchema } from "@shared/schema";
+import { insertOrderSchema, insertRestaurantSchema, loginSchema } from "@shared/schema";
+import { authenticateToken, generateToken, type AuthenticatedRequest } from "./auth";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Get all orders
-  app.get("/api/orders", async (req, res) => {
+  // Authentication routes
+  app.post("/api/auth/register", async (req, res) => {
     try {
-      const orders = await storage.getOrders();
+      const validatedData = insertRestaurantSchema.parse(req.body);
+      
+      // Check if restaurant already exists
+      const existingRestaurant = await storage.getRestaurantByEmail(validatedData.email);
+      if (existingRestaurant) {
+        return res.status(400).json({ error: "Restaurant already exists with this email" });
+      }
+
+      const restaurant = await storage.createRestaurant(validatedData);
+      const token = generateToken(restaurant.id);
+      
+      res.status(201).json({
+        token,
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          email: restaurant.email,
+          address: restaurant.address,
+          phone: restaurant.phone,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating restaurant:", error);
+      res.status(500).json({ error: "Failed to create restaurant" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = loginSchema.parse(req.body);
+      
+      const restaurant = await storage.verifyPassword(email, password);
+      if (!restaurant) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      const token = generateToken(restaurant.id);
+      
+      res.json({
+        token,
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          email: restaurant.email,
+          address: restaurant.address,
+          phone: restaurant.phone,
+        },
+      });
+    } catch (error) {
+      console.error("Error logging in:", error);
+      res.status(500).json({ error: "Failed to log in" });
+    }
+  });
+
+  app.get("/api/auth/me", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const restaurant = req.restaurant;
+      res.json({
+        id: restaurant.id,
+        name: restaurant.name,
+        email: restaurant.email,
+        address: restaurant.address,
+        phone: restaurant.phone,
+      });
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  // Protected order routes
+  app.get("/api/orders", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const orders = await storage.getOrders(req.restaurantId!);
       res.json(orders);
     } catch (error) {
       console.error("Error fetching orders:", error);

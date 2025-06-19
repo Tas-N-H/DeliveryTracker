@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { OrderCard } from "@/components/order-card";
 import { ReceiptScanner } from "@/components/receipt-scanner";
-import { Plus, BarChart3 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { Plus, BarChart3, LogOut } from "lucide-react";
 import type { Order } from "@shared/schema";
 
 interface SidebarProps {
@@ -29,22 +30,36 @@ export function Sidebar({
   onToggleMobileSidebar,
   onRefetch,
 }: SidebarProps) {
+  const { restaurant, logout } = useAuth();
   return (
     <div className="w-full h-full bg-white shadow-lg flex flex-col border-r border-gray-200">
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-200 bg-primary text-white">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Delivery Manager</h1>
-          <button 
-            className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
-            onClick={onToggleMobileSidebar}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div>
+            <h1 className="text-xl font-semibold">Delivery Manager</h1>
+            <p className="text-blue-100 text-sm mt-1">{restaurant?.name || "Restaurant Dashboard"}</p>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className="text-white hover:bg-blue-700 hidden md:flex"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+            <button 
+              className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
+              onClick={onToggleMobileSidebar}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <p className="text-blue-100 text-sm mt-1">Medway Takeaway Orders</p>
       </div>
 
       {/* Add Order Section */}
