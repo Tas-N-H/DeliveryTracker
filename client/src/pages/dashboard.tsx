@@ -18,10 +18,8 @@ export default function Dashboard() {
   const activeOrders = orders.filter(order => order.status !== "delivered");
   
   // Count orders by status
-  const pendingCount = activeOrders.filter(order => order.status === "pending").length;
-  const preparingCount = activeOrders.filter(order => order.status === "preparing").length;
   const cookingCount = activeOrders.filter(order => order.status === "cooking").length;
-  const readyCount = activeOrders.filter(order => order.status === "ready").length;
+  const packedCount = activeOrders.filter(order => order.status === "packed").length;
   const transitCount = activeOrders.filter(order => order.status === "in-transit").length;
 
   // Get today's delivered orders count
@@ -60,10 +58,8 @@ export default function Dashboard() {
       `}>
         <Sidebar
           orders={activeOrders}
-          pendingCount={pendingCount}
-          preparingCount={preparingCount}
           cookingCount={cookingCount}
-          readyCount={readyCount}
+          packedCount={packedCount}
           transitCount={transitCount}
           deliveredCount={deliveredToday}
           selectedOrderId={selectedOrderId}

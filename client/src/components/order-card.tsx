@@ -64,13 +64,9 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "pending":
-        return "bg-red-500";
-      case "preparing":
-        return "bg-yellow-500";
       case "cooking":
-        return "bg-amber-600";
-      case "ready":
+        return "bg-red-500";
+      case "packed":
         return "bg-blue-500";
       case "in-transit":
         return "bg-orange-500";
@@ -137,36 +133,6 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
       <p className="text-xs text-gray-500 mb-3">{formatPlatform(order.platform)}</p>
       
       <div className="flex space-x-2 flex-wrap">
-        {order.status === "pending" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-xs bg-yellow-500 text-white border-yellow-500 hover:bg-yellow-600"
-            onClick={(e) => {
-              e.stopPropagation();
-              updateStatusMutation.mutate("preparing");
-            }}
-            disabled={updateStatusMutation.isPending}
-          >
-            Start Preparing
-          </Button>
-        )}
-        
-        {order.status === "preparing" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-xs bg-amber-600 text-white border-amber-600 hover:bg-amber-700"
-            onClick={(e) => {
-              e.stopPropagation();
-              updateStatusMutation.mutate("cooking");
-            }}
-            disabled={updateStatusMutation.isPending}
-          >
-            Start Cooking
-          </Button>
-        )}
-
         {order.status === "cooking" && (
           <Button
             size="sm"
@@ -174,15 +140,15 @@ export function OrderCard({ order, isSelected, onSelect, onRefetch }: OrderCardP
             className="text-xs bg-blue-500 text-white border-blue-500 hover:bg-blue-600"
             onClick={(e) => {
               e.stopPropagation();
-              updateStatusMutation.mutate("ready");
+              updateStatusMutation.mutate("packed");
             }}
             disabled={updateStatusMutation.isPending}
           >
-            Mark Ready
+            Mark Packed
           </Button>
         )}
 
-        {order.status === "ready" && (
+        {order.status === "packed" && (
           <Button
             size="sm"
             variant="outline"

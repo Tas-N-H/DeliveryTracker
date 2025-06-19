@@ -38,7 +38,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const { status } = req.body;
       
-      if (!status || !["pending", "preparing", "cooking", "ready", "in-transit", "delivered"].includes(status)) {
+      if (!status || !["cooking", "packed", "in-transit", "delivered"].includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
 

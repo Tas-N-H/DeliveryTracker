@@ -61,7 +61,7 @@ export function AddOrderModal({ isOpen, onClose, onSuccess }: AddOrderModalProps
       orderNumber: "",
       address: "",
       platform: "",
-      status: "pending",
+      status: "cooking",
       latitude: "",
       longitude: "",
     },

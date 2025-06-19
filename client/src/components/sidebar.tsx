@@ -5,10 +5,8 @@ import type { Order } from "@shared/schema";
 
 interface SidebarProps {
   orders: Order[];
-  pendingCount: number;
-  preparingCount: number;
   cookingCount: number;
-  readyCount: number;
+  packedCount: number;
   transitCount: number;
   deliveredCount: number;
   selectedOrderId: number | null;
@@ -20,10 +18,8 @@ interface SidebarProps {
 
 export function Sidebar({
   orders,
-  pendingCount,
-  preparingCount,
   cookingCount,
-  readyCount,
+  packedCount,
   transitCount,
   deliveredCount,
   selectedOrderId,
@@ -71,20 +67,6 @@ export function Sidebar({
           <div className="flex justify-between items-center">
             <div className="flex items-center">
               <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
-              <span className="text-sm text-gray-600">Pending</span>
-            </div>
-            <span className="text-sm font-medium text-gray-800">{pendingCount}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
-              <span className="text-sm text-gray-600">Preparing</span>
-            </div>
-            <span className="text-sm font-medium text-gray-800">{preparingCount}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-amber-600 mr-2"></div>
               <span className="text-sm text-gray-600">Cooking</span>
             </div>
             <span className="text-sm font-medium text-gray-800">{cookingCount}</span>
@@ -92,9 +74,9 @@ export function Sidebar({
           <div className="flex justify-between items-center">
             <div className="flex items-center">
               <div className="w-3 h-3 rounded-full bg-blue-500 mr-2"></div>
-              <span className="text-sm text-gray-600">Ready</span>
+              <span className="text-sm text-gray-600">Packed</span>
             </div>
-            <span className="text-sm font-medium text-gray-800">{readyCount}</span>
+            <span className="text-sm font-medium text-gray-800">{packedCount}</span>
           </div>
           <div className="flex justify-between items-center">
             <div className="flex items-center">

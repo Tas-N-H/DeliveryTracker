@@ -7,7 +7,7 @@ export const orders = pgTable("orders", {
   orderNumber: text("order_number").notNull(),
   address: text("address").notNull(),
   platform: text("platform").notNull(),
-  status: text("status").notNull().default("pending"), // pending, preparing, cooking, ready, in-transit, delivered
+  status: text("status").notNull().default("cooking"), // cooking, packed, in-transit, delivered
   latitude: text("latitude"),
   longitude: text("longitude"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

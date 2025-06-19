@@ -80,10 +80,8 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
 
         const getMarkerColor = (status: string) => {
           switch (status) {
-            case "pending": return "#F44336"; // red
-            case "preparing": return "#FFC107"; // yellow
-            case "cooking": return "#FF8F00"; // amber
-            case "ready": return "#2196F3"; // blue
+            case "cooking": return "#F44336"; // red
+            case "packed": return "#2196F3"; // blue
             case "in-transit": return "#FF9800"; // orange
             default: return "#9E9E9E"; // gray
           }
@@ -170,19 +168,11 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
         <div className="space-y-1 text-xs">
           <div className="flex items-center">
             <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
-            <span className="text-gray-600">Pending</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
-            <span className="text-gray-600">Preparing</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-amber-600 mr-2"></div>
             <span className="text-gray-600">Cooking</span>
           </div>
           <div className="flex items-center">
             <div className="w-3 h-3 rounded-full bg-blue-500 mr-2"></div>
-            <span className="text-gray-600">Ready</span>
+            <span className="text-gray-600">Packed</span>
           </div>
           <div className="flex items-center">
             <div className="w-3 h-3 rounded-full bg-orange-500 mr-2"></div>
