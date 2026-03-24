@@ -1,8 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { OrderCard } from "@/components/order-card";
 import { ReceiptScanner } from "@/components/receipt-scanner";
-import { useAuth } from "@/contexts/auth-context";
-import { Plus, BarChart3, LogOut } from "lucide-react";
+import { Plus, BarChart3 } from "lucide-react";
 import type { Order } from "@shared/schema";
 
 interface SidebarProps {
@@ -30,7 +29,6 @@ export function Sidebar({
   onToggleMobileSidebar,
   onRefetch,
 }: SidebarProps) {
-  const { restaurant, logout } = useAuth();
   return (
     <div className="w-full h-full bg-white shadow-lg flex flex-col border-r border-gray-200">
       {/* Header */}
@@ -38,33 +36,22 @@ export function Sidebar({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold">Delivery Manager</h1>
-            <p className="text-blue-100 text-sm mt-1">{restaurant?.name || "Restaurant Dashboard"}</p>
+            <p className="text-blue-100 text-sm mt-1">Restaurant Dashboard</p>
           </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={logout}
-              className="text-white hover:bg-blue-700 hidden md:flex"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
-            <button 
-              className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
-              onClick={onToggleMobileSidebar}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+          <button
+            className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
+            onClick={onToggleMobileSidebar}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       </div>
 
       {/* Add Order Section */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
-        <Button 
+        <Button
           onClick={onAddOrder}
           className="w-full bg-primary text-white hover:bg-blue-700 transition duration-200"
         >
@@ -115,7 +102,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto">
         <div className="p-4">
           <h2 className="font-semibold text-gray-800 mb-3">Active Orders</h2>
-          
+
           {orders.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <div className="text-sm">No active orders</div>
