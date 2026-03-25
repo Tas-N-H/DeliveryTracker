@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { OrderCard } from "@/components/order-card";
 import { ReceiptScanner } from "@/components/receipt-scanner";
-import { Plus, BarChart3 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { Plus, BarChart3, LogOut } from "lucide-react";
 import type { Order } from "@shared/schema";
 
 interface SidebarProps {
@@ -29,6 +30,8 @@ export function Sidebar({
   onToggleMobileSidebar,
   onRefetch,
 }: SidebarProps) {
+  const { user, logout } = useAuth();
+
   return (
     <div className="w-full h-full bg-white shadow-lg flex flex-col border-r border-gray-200">
       {/* Header */}
@@ -36,16 +39,29 @@ export function Sidebar({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold">Delivery Manager</h1>
-            <p className="text-blue-100 text-sm mt-1">Restaurant Dashboard</p>
+            <p className="text-blue-100 text-sm mt-1">
+              {user?.firstName ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}` : "Dashboard"}
+            </p>
           </div>
-          <button
-            className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
-            onClick={onToggleMobileSidebar}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => logout()}
+              className="text-white hover:bg-blue-700 hidden md:flex items-center gap-1"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="text-sm">Logout</span>
+            </Button>
+            <button
+              className="md:hidden text-white hover:bg-blue-700 p-2 rounded"
+              onClick={onToggleMobileSidebar}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 

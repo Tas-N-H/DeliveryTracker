@@ -1,3 +1,4 @@
+export * from "./models/auth";
 import { pgTable, text, serial, timestamp, integer, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";

@@ -2,11 +2,15 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrderSchema } from "@shared/schema";
+import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  await setupAuth(app);
+  registerAuthRoutes(app);
+
   // Get all active orders
-  app.get("/api/orders", async (req, res) => {
+  app.get("/api/orders", isAuthenticated, async (req, res) => {
     try {
       const orderList = await storage.getOrders();
       res.json(orderList);
@@ -17,7 +21,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create new order
-  app.post("/api/orders", async (req, res) => {
+  app.post("/api/orders", isAuthenticated, async (req, res) => {
     try {
       const validatedData = insertOrderSchema.parse(req.body);
       const order = await storage.createOrder(validatedData);
@@ -33,7 +37,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update order status
-  app.patch("/api/orders/:id/status", async (req, res) => {
+  app.patch("/api/orders/:id/status", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { status } = req.body;
@@ -55,7 +59,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Mark order as delivered
-  app.delete("/api/orders/:id", async (req, res) => {
+  app.delete("/api/orders/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.markOrderAsDelivered(id);
@@ -72,7 +76,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get today's delivered orders count
-  app.get("/api/orders/delivered/today", async (req, res) => {
+  app.get("/api/orders/delivered/today", isAuthenticated, async (req, res) => {
     try {
       const deliveredList = await storage.getTodaysDeliveredOrders();
       res.json(deliveredList);
@@ -83,7 +87,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get all delivered orders
-  app.get("/api/orders/delivered", async (req, res) => {
+  app.get("/api/orders/delivered", isAuthenticated, async (req, res) => {
     try {
       const deliveredList = await storage.getDeliveredOrders();
       res.json(deliveredList);
@@ -94,7 +98,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Geocode UK address
-  app.post("/api/geocode", async (req, res) => {
+  app.post("/api/geocode", isAuthenticated, async (req, res) => {
     try {
       const { address } = req.body;
 
