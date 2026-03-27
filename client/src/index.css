@@ -11,12 +11,6 @@
   100% { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
 }
 
-/* Steady ring: a soft static halo (post-5-second phase) */
-@keyframes marker-steady {
-  0%, 100% { transform: translate(-50%, -50%) scale(1.55); opacity: 0.35; }
-  50%       { transform: translate(-50%, -50%) scale(1.7);  opacity: 0.18; }
-}
-
 .marker-ring-flashing {
   position: absolute;
   top: 50%;
@@ -25,16 +19,6 @@
   height: 20px;
   border-radius: 50%;
   animation: marker-flash 1.1s ease-out infinite;
-}
-
-.marker-ring-steady {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  animation: marker-steady 2s ease-in-out infinite;
 }
 
 .marker-dot {

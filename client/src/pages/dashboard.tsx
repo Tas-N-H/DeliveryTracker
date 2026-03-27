@@ -8,7 +8,14 @@ import type { Order } from "@shared/schema";
 export default function Dashboard() {
   const [isAddOrderModalOpen, setIsAddOrderModalOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [selectionKey, setSelectionKey] = useState(0);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Always increment selectionKey so re-clicking the same order re-triggers the map effect
+  const handleOrderSelect = (id: number | null) => {
+    setSelectedOrderId(id);
+    setSelectionKey(k => k + 1);
+  };
 
   const { data: orders = [], isLoading, refetch } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
@@ -63,7 +70,7 @@ export default function Dashboard() {
           transitCount={transitCount}
           deliveredCount={deliveredToday}
           selectedOrderId={selectedOrderId}
-          onOrderSelect={setSelectedOrderId}
+          onOrderSelect={handleOrderSelect}
           onAddOrder={() => setIsAddOrderModalOpen(true)}
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           onRefetch={refetch}
@@ -85,7 +92,8 @@ export default function Dashboard() {
         <MapContainer
           orders={activeOrders}
           selectedOrderId={selectedOrderId}
-          onOrderSelect={setSelectedOrderId}
+          selectionKey={selectionKey}
+          onOrderSelect={handleOrderSelect}
         />
       </div>
 

@@ -11,10 +11,11 @@ declare global {
 interface MapContainerProps {
   orders: Order[];
   selectedOrderId: number | null;
+  selectionKey: number;
   onOrderSelect: (id: number | null) => void;
 }
 
-type MarkerMode = "normal" | "flashing" | "steady";
+type MarkerMode = "normal" | "flashing";
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 const statusColor = (status: string) => {
@@ -26,33 +27,29 @@ const statusColor = (status: string) => {
   }
 };
 
-// ── Icon builder: three visual modes ─────────────────────────────────────────
+// ── Icon builder: two visual modes ───────────────────────────────────────────
 const buildIcon = (color: string, mode: MarkerMode) => {
-  if (mode === "normal") {
+  if (mode === "flashing") {
     return window.L.divIcon({
-      html: `<div style="position:relative;width:20px;height:20px;">
-               <div class="marker-dot" style="background:${color};width:12px;height:12px;"></div>
+      html: `<div style="position:relative;width:30px;height:30px;">
+               <div class="marker-ring-flashing" style="background:${color};"></div>
+               <div class="marker-dot" style="background:${color};width:16px;height:16px;"></div>
              </div>`,
       className: "",
-      iconSize:    [20, 20],
-      iconAnchor:  [10, 10],
-      popupAnchor: [0, -10],
+      iconSize:    [30, 30],
+      iconAnchor:  [15, 15],
+      popupAnchor: [0, -15],
     });
   }
-
-  // flashing: rapidly expanding ring
-  // steady: slow soft halo
-  const ringClass = mode === "flashing" ? "marker-ring-flashing" : "marker-ring-steady";
-
+  // normal
   return window.L.divIcon({
-    html: `<div style="position:relative;width:30px;height:30px;">
-             <div class="${ringClass}" style="background:${color};"></div>
-             <div class="marker-dot" style="background:${color};width:16px;height:16px;"></div>
+    html: `<div style="position:relative;width:20px;height:20px;">
+             <div class="marker-dot" style="background:${color};width:12px;height:12px;"></div>
            </div>`,
     className: "",
-    iconSize:    [30, 30],
-    iconAnchor:  [15, 15],
-    popupAnchor: [0, -15],
+    iconSize:    [20, 20],
+    iconAnchor:  [10, 10],
+    popupAnchor: [0, -10],
   });
 };
 
@@ -69,18 +66,20 @@ const buildPopup = (order: Order, color: string) => `
   </div>`;
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapContainerProps) {
+export function MapContainer({ orders, selectedOrderId, selectionKey, onOrderSelect }: MapContainerProps) {
   const mapRef          = useRef<HTMLDivElement>(null);
   const mapInstanceRef  = useRef<any>(null);
   const markersRef      = useRef<Map<number, any>>(new Map());
 
-  // Mutable refs so effects always see latest values without re-running
+  // Mutable refs — always hold latest values without causing effect re-runs
   const ordersRef       = useRef<Order[]>(orders);
   const selectedIdRef   = useRef<number | null>(selectedOrderId);
   const prevSelectedRef = useRef<number | null>(null);
   const flashTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks which order id is currently flashing (for Effect 2 icon accuracy)
+  const flashingIdRef   = useRef<number | null>(null);
 
-  ordersRef.current   = orders;
+  ordersRef.current     = orders;
   selectedIdRef.current = selectedOrderId;
 
   const { toast } = useToast();
@@ -156,10 +155,8 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
       const lng = parseFloat(order.longitude);
       if (isNaN(lat) || isNaN(lng)) return;
 
-      // Determine current mode for this marker
-      const isSelected  = selectedIdRef.current === order.id;
-      const isFlashing  = isSelected && flashTimerRef.current !== null;
-      const mode: MarkerMode = isSelected ? (isFlashing ? "flashing" : "steady") : "normal";
+      // Mode is "flashing" only if this is the actively flashing order
+      const mode: MarkerMode = flashingIdRef.current === order.id ? "flashing" : "normal";
       const icon = buildIcon(statusColor(order.status), mode);
 
       if (markersRef.current.has(order.id)) {
@@ -175,37 +172,39 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
     });
   }, [orders, onOrderSelect]);
 
-  // ── Effect 3: handle selection changes — flyTo + flash lifecycle ─────────────
+  // ── Effect 3: handle selection — flyTo + 5-second flash, then full reset ─────
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
     const prevId = prevSelectedRef.current;
 
-    // ① Clear any running flash timer from the previous selection
+    // ① Cancel any running flash timer
     clearFlashTimer();
 
-    // ② Restore the previously selected marker to normal
+    // ② Restore the PREVIOUS marker fully to normal (only if it's a different order)
     if (prevId !== null && prevId !== selectedOrderId) {
+      flashingIdRef.current = null;
       setMarkerMode(prevId, "normal");
       markersRef.current.get(prevId)?.closePopup();
     }
 
     // ③ Nothing selected — done
     if (selectedOrderId === null) {
+      flashingIdRef.current = null;
       prevSelectedRef.current = null;
       return;
     }
 
     const order = ordersRef.current.find(o => o.id === selectedOrderId);
 
-    // ④ No matching order
+    // ④ No matching order object
     if (!order) {
       prevSelectedRef.current = selectedOrderId;
       return;
     }
 
-    // ⑤ No valid coordinates — notify and bail
+    // ⑤ No valid coordinates — show a subtle notification and stop
     if (!order.latitude || !order.longitude) {
       toast({
         title: "No location data",
@@ -223,36 +222,33 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
       return;
     }
 
-    // ⑥ Start flashing the newly selected marker
+    // ⑥ Start flashing this marker
+    flashingIdRef.current = selectedOrderId;
     setMarkerMode(selectedOrderId, "flashing");
     markersRef.current.get(selectedOrderId)?.openPopup();
 
-    // ⑦ After 5 s, transition to steady highlighted state
+    // ⑦ After exactly 5 s → revert fully to normal; interaction is complete
     flashTimerRef.current = setTimeout(() => {
       flashTimerRef.current = null;
-      // Only update if this order is still selected
-      if (selectedIdRef.current === selectedOrderId) {
-        setMarkerMode(selectedOrderId, "steady");
-      }
+      flashingIdRef.current = null;
+      setMarkerMode(selectedOrderId, "normal");
+      markersRef.current.get(selectedOrderId)?.closePopup();
     }, 5000);
 
-    // ⑧ Animate the map — skip if already focused on this order
-    const isNewSelection = prevId !== selectedOrderId;
-    if (isNewSelection) {
-      const centre = map.getCenter();
-      const alreadyFocused =
-        Math.abs(centre.lat - lat) < 0.0005 &&
-        Math.abs(centre.lng - lng) < 0.0005 &&
-        map.getZoom() >= 15;
+    // ⑧ Smooth pan+zoom — skip only if the map is already centred on this order
+    const centre = map.getCenter();
+    const alreadyCentred =
+      Math.abs(centre.lat - lat) < 0.0005 &&
+      Math.abs(centre.lng - lng) < 0.0005 &&
+      map.getZoom() >= 15;
 
-      if (!alreadyFocused) {
-        map.flyTo([lat, lng], 16, { animate: true, duration: 0.7 });
-      }
+    if (!alreadyCentred) {
+      map.flyTo([lat, lng], 16, { animate: true, duration: 0.7 });
     }
 
     prevSelectedRef.current = selectedOrderId;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedOrderId]);
+  }, [selectedOrderId, selectionKey]);
 
   // ── Map control handlers ──────────────────────────────────────────────────
   const centerMap = () =>
