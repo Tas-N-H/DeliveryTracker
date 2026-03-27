@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import { Crosshair, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@shared/schema";
 
-// Import Leaflet dynamically to avoid SSR issues
 declare global {
   interface Window {
     L: any;
@@ -16,43 +16,93 @@ interface MapContainerProps {
   onOrderSelect: (id: number | null) => void;
 }
 
-export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapContainerProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const markersRef = useRef<Map<number, any>>(new Map());
+const getMarkerColor = (status: string) => {
+  switch (status) {
+    case "cooking":    return "#F44336";
+    case "packed":     return "#2196F3";
+    case "in-transit": return "#FF9800";
+    default:           return "#9E9E9E";
+  }
+};
 
-  // Initialize map
+const buildIcon = (color: string, selected: boolean) => {
+  if (selected) {
+    return window.L.divIcon({
+      html: `
+        <div style="position:relative;width:30px;height:30px;">
+          <div class="marker-pulse-ring" style="background-color:${color};"></div>
+          <div class="marker-dot" style="background-color:${color};width:16px;height:16px;"></div>
+        </div>`,
+      className: "",
+      iconSize:   [30, 30],
+      iconAnchor: [15, 15],
+      popupAnchor:[0, -15],
+    });
+  }
+  return window.L.divIcon({
+    html: `
+      <div style="position:relative;width:20px;height:20px;">
+        <div class="marker-dot" style="background-color:${color};width:12px;height:12px;"></div>
+      </div>`,
+    className: "",
+    iconSize:   [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor:[0, -10],
+  });
+};
+
+const buildPopup = (order: Order, color: string) => {
+  const platformName = order.platform.replace("-", " ").toUpperCase();
+  const statusName   = order.status.replace("-", " ").toUpperCase();
+  return `
+    <div style="min-width:150px;padding:4px 2px;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Order #${order.orderNumber}</div>
+      <div style="font-size:11px;color:#555;margin-bottom:4px;">${order.address}</div>
+      <div style="font-size:11px;color:#888;margin-bottom:4px;">${platformName}</div>
+      <div style="font-size:11px;display:flex;align-items:center;gap:4px;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};"></span>
+        ${statusName}
+      </div>
+    </div>`;
+};
+
+export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapContainerProps) {
+  const mapRef           = useRef<HTMLDivElement>(null);
+  const mapInstanceRef   = useRef<any>(null);
+  const markersRef       = useRef<Map<number, any>>(new Map());
+  const ordersRef        = useRef<Order[]>(orders);
+  const selectedIdRef    = useRef<number | null>(selectedOrderId);
+  const prevSelectedRef  = useRef<number | null>(null);
+  const { toast } = useToast();
+
+  // Keep refs in sync with latest props (no re-render needed)
+  ordersRef.current   = orders;
+  selectedIdRef.current = selectedOrderId;
+
+  // ── Effect 1: initialise the map once ──────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current) return;
 
-    // Load Leaflet CSS and JS
-    const loadLeaflet = async () => {
+    const init = async () => {
       if (!window.L) {
-        // Load Leaflet CSS
-        const cssLink = document.createElement("link");
-        cssLink.rel = "stylesheet";
-        cssLink.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-        document.head.appendChild(cssLink);
+        const css = document.createElement("link");
+        css.rel  = "stylesheet";
+        css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        document.head.appendChild(css);
 
-        // Load Leaflet JS
         const script = document.createElement("script");
         script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-        await new Promise((resolve) => {
-          script.onload = resolve;
-          document.head.appendChild(script);
-        });
+        await new Promise<void>((res) => { script.onload = () => res(); document.head.appendChild(script); });
       }
 
-      // Initialize map centered on Medway, UK
+      if (mapInstanceRef.current) return;
       mapInstanceRef.current = window.L.map(mapRef.current).setView([51.4, 0.55], 12);
-
-      // Add OpenStreetMap tiles
       window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '© OpenStreetMap contributors',
+        attribution: "© OpenStreetMap contributors",
       }).addTo(mapInstanceRef.current);
     };
 
-    loadLeaflet();
+    init();
 
     return () => {
       if (mapInstanceRef.current) {
@@ -62,76 +112,117 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
     };
   }, []);
 
-  // Update markers when orders change
+  // ── Effect 2: sync markers when orders change ──────────────────────────────
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+    if (!map) return;
 
-    // Clear existing markers
-    markersRef.current.forEach((marker) => {
-      mapInstanceRef.current.removeLayer(marker);
+    const currentIds = new Set(orders.map((o) => o.id));
+
+    // Remove markers for orders that no longer exist
+    markersRef.current.forEach((marker, id) => {
+      if (!currentIds.has(id)) {
+        map.removeLayer(marker);
+        markersRef.current.delete(id);
+      }
     });
-    markersRef.current.clear();
 
-    // Add markers for orders with coordinates
+    // Add or update markers for current orders
     orders.forEach((order) => {
-      if (order.latitude && order.longitude) {
-        const lat = parseFloat(order.latitude);
-        const lng = parseFloat(order.longitude);
+      if (!order.latitude || !order.longitude) return;
+      const lat = parseFloat(order.latitude);
+      const lng = parseFloat(order.longitude);
+      if (isNaN(lat) || isNaN(lng)) return;
 
-        const getMarkerColor = (status: string) => {
-          switch (status) {
-            case "cooking": return "#F44336"; // red
-            case "packed": return "#2196F3"; // blue
-            case "in-transit": return "#FF9800"; // orange
-            default: return "#9E9E9E"; // gray
-          }
-        };
-        const color = getMarkerColor(order.status);
-        const isSelected = selectedOrderId === order.id;
+      const isSelected = selectedIdRef.current === order.id;
+      const color      = getMarkerColor(order.status);
+      const icon       = buildIcon(color, isSelected);
 
-        const marker = window.L.circleMarker([lat, lng], {
-          radius: isSelected ? 12 : 10,
-          fillColor: color,
-          color: "#fff",
-          weight: isSelected ? 3 : 2,
-          opacity: 1,
-          fillOpacity: 0.8,
-        }).addTo(mapInstanceRef.current);
-
-        // Add popup
-        const platformName = order.platform.replace("-", " ").toUpperCase();
-        const statusName = order.status.replace("-", " ").toUpperCase();
-        
-        marker.bindPopup(`
-          <div class="p-2">
-            <div class="font-semibold text-sm mb-1">Order #${order.orderNumber}</div>
-            <div class="text-xs text-gray-600 mb-2">${order.address}</div>
-            <div class="text-xs text-gray-500 mb-2">${platformName}</div>
-            <div class="text-xs">
-              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background-color: ${color}"></span>
-              ${statusName}
-            </div>
-          </div>
-        `);
-
-        // Handle marker click
-        marker.on("click", () => {
-          onOrderSelect(order.id);
-        });
-
+      if (markersRef.current.has(order.id)) {
+        const marker = markersRef.current.get(order.id)!;
+        marker.setIcon(icon);
+        marker.getPopup()?.setContent(buildPopup(order, color));
+      } else {
+        const marker = window.L.marker([lat, lng], { icon }).addTo(map);
+        marker.bindPopup(buildPopup(order, color));
+        marker.on("click", () => onOrderSelect(order.id));
         markersRef.current.set(order.id, marker);
       }
     });
-  }, [orders, selectedOrderId, onOrderSelect]);
+  }, [orders, onOrderSelect]);
 
-  // Center map on Medway
+  // ── Effect 3: handle selection — update icons + flyTo ─────────────────────
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Restore previous marker to normal style
+    const prevId = prevSelectedRef.current;
+    if (prevId !== null && prevId !== selectedOrderId) {
+      const prevMarker = markersRef.current.get(prevId);
+      const prevOrder  = ordersRef.current.find((o) => o.id === prevId);
+      if (prevMarker && prevOrder) {
+        prevMarker.setIcon(buildIcon(getMarkerColor(prevOrder.status), false));
+        prevMarker.closePopup();
+      }
+    }
+
+    // Apply selected style + flyTo
+    if (selectedOrderId !== null) {
+      const order  = ordersRef.current.find((o) => o.id === selectedOrderId);
+      const marker = markersRef.current.get(selectedOrderId);
+
+      if (!order) {
+        prevSelectedRef.current = selectedOrderId;
+        return;
+      }
+
+      if (!order.latitude || !order.longitude) {
+        toast({
+          title: "No location data",
+          description: `Order #${order.orderNumber} doesn't have coordinates yet.`,
+          variant: "destructive",
+        });
+        prevSelectedRef.current = selectedOrderId;
+        return;
+      }
+
+      const lat = parseFloat(order.latitude);
+      const lng = parseFloat(order.longitude);
+
+      if (isNaN(lat) || isNaN(lng)) {
+        prevSelectedRef.current = selectedOrderId;
+        return;
+      }
+
+      if (marker) {
+        marker.setIcon(buildIcon(getMarkerColor(order.status), true));
+        marker.openPopup();
+      }
+
+      // Only animate if this is a new selection
+      if (prevId !== selectedOrderId) {
+        const currentCenter = map.getCenter();
+        const alreadyThere  =
+          Math.abs(currentCenter.lat - lat) < 0.0005 &&
+          Math.abs(currentCenter.lng - lng) < 0.0005 &&
+          map.getZoom() >= 15;
+
+        if (!alreadyThere) {
+          map.flyTo([lat, lng], 16, { animate: true, duration: 0.7 });
+        }
+      }
+    }
+
+    prevSelectedRef.current = selectedOrderId;
+  }, [selectedOrderId, toast]);
+
   const centerMap = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([51.4, 0.55], 12);
+      mapInstanceRef.current.flyTo([51.4, 0.55], 12, { animate: true, duration: 0.6 });
     }
   };
 
-  // Refresh map
   const refreshMap = () => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.invalidateSize();
@@ -181,7 +272,6 @@ export function MapContainer({ orders, selectedOrderId, onOrderSelect }: MapCont
         </div>
       </div>
 
-      {/* Map container */}
       <div ref={mapRef} className="w-full h-full" />
     </div>
   );
