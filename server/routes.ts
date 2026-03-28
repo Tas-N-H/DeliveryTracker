@@ -1,15 +1,108 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrderSchema } from "@shared/schema";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { z } from "zod";
+import bcrypt from "bcrypt";
+
+// ── Restaurant session middleware ─────────────────────────────────────────────
+
+export const isRestaurantAuthenticated: RequestHandler = (req, res, next) => {
+  if (!req.session.restaurantSession) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  // Get all active orders
+  // ── Restaurant auth ─────────────────────────────────────────────────────────
+
+  // POST /api/:restaurantSlug/login
+  app.post("/api/:restaurantSlug/login", async (req, res) => {
+    const { restaurantSlug } = req.params;
+    const { email, password } = req.body;
+
+    const unauthorized = () =>
+      res.status(401).json({ message: "Unauthorised access" });
+
+    try {
+      // 1. Look up restaurant
+      const restaurant = await storage.getRestaurantBySlug(restaurantSlug);
+      if (!restaurant) {
+        return res.status(404).json({ message: "Restaurant not found" });
+      }
+
+      // 2. Find user by email
+      if (!email || !password) return unauthorized();
+      const user = await storage.getUserByEmail(email.trim().toLowerCase());
+      if (!user) return unauthorized();
+
+      // 3. Verify password
+      const passwordValid = await bcrypt.compare(password, user.passwordHash);
+      if (!passwordValid) return unauthorized();
+
+      // 4. Check restaurant membership
+      const membership = await storage.getRestaurantUser(user.id, restaurant.id);
+      if (!membership) return unauthorized();
+
+      // 5. Create session
+      req.session.restaurantSession = {
+        userId: user.id,
+        role: membership.role,
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+      };
+
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => (err ? reject(err) : resolve()))
+      );
+
+      return res.json({
+        userId: user.id,
+        role: membership.role,
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      return res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // POST /api/:restaurantSlug/logout
+  app.post("/api/:restaurantSlug/logout", (req, res) => {
+    req.session.restaurantSession = undefined;
+    req.session.save(() => res.json({ ok: true }));
+  });
+
+  // GET /api/:restaurantSlug/me — returns current session for this restaurant
+  app.get("/api/:restaurantSlug/me", (req, res) => {
+    const session = req.session.restaurantSession;
+    if (!session || session.restaurantSlug !== req.params.restaurantSlug) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    return res.json(session);
+  });
+
+  // GET /api/:restaurantSlug/info — public: confirms the restaurant exists
+  app.get("/api/:restaurantSlug/info", async (req, res) => {
+    try {
+      const restaurant = await storage.getRestaurantBySlug(req.params.restaurantSlug);
+      if (!restaurant) {
+        return res.status(404).json({ message: "Restaurant not found" });
+      }
+      return res.json({ name: restaurant.name, slug: restaurant.slug });
+    } catch (error) {
+      return res.status(500).json({ message: "Server error" });
+    }
+  });
+
+  // ── Orders ──────────────────────────────────────────────────────────────────
+
   app.get("/api/orders", isAuthenticated, async (req, res) => {
     try {
       const orderList = await storage.getOrders();
@@ -20,7 +113,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create new order
   app.post("/api/orders", isAuthenticated, async (req, res) => {
     try {
       const validatedData = insertOrderSchema.parse(req.body);
@@ -36,7 +128,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Update order status
   app.patch("/api/orders/:id/status", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -58,7 +149,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Mark order as delivered
   app.delete("/api/orders/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -75,7 +165,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get today's delivered orders count
   app.get("/api/orders/delivered/today", isAuthenticated, async (req, res) => {
     try {
       const deliveredList = await storage.getTodaysDeliveredOrders();
@@ -86,7 +175,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all delivered orders
   app.get("/api/orders/delivered", isAuthenticated, async (req, res) => {
     try {
       const deliveredList = await storage.getDeliveredOrders();
@@ -97,7 +185,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Geocode UK address
+  // ── Geocoding ───────────────────────────────────────────────────────────────
+
   app.post("/api/geocode", isAuthenticated, async (req, res) => {
     try {
       const { address } = req.body;

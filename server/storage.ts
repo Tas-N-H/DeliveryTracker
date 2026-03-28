@@ -1,14 +1,21 @@
 import {
   orders,
   deliveredOrders,
+  restaurants,
+  users,
+  restaurantUsers,
   type Order,
   type InsertOrder,
   type DeliveredOrder,
+  type Restaurant,
+  type AppUser,
+  type RestaurantUser,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, gte } from "drizzle-orm";
+import { eq, gte, and } from "drizzle-orm";
 
 export interface IStorage {
+  // Orders
   getOrders(): Promise<Order[]>;
   getOrder(id: number): Promise<Order | undefined>;
   createOrder(order: InsertOrder): Promise<Order>;
@@ -17,6 +24,11 @@ export interface IStorage {
   getDeliveredOrders(): Promise<DeliveredOrder[]>;
   getTodaysDeliveredOrders(): Promise<DeliveredOrder[]>;
   markOrderAsDelivered(id: number): Promise<boolean>;
+
+  // Restaurant auth
+  getRestaurantBySlug(slug: string): Promise<Restaurant | undefined>;
+  getUserByEmail(email: string): Promise<AppUser | undefined>;
+  getRestaurantUser(userId: number, restaurantId: number): Promise<RestaurantUser | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -77,6 +89,35 @@ export class DatabaseStorage implements IStorage {
 
     await this.deleteOrder(id);
     return true;
+  }
+
+  async getRestaurantBySlug(slug: string): Promise<Restaurant | undefined> {
+    const [restaurant] = await db
+      .select()
+      .from(restaurants)
+      .where(eq(restaurants.slug, slug));
+    return restaurant;
+  }
+
+  async getUserByEmail(email: string): Promise<AppUser | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email));
+    return user;
+  }
+
+  async getRestaurantUser(userId: number, restaurantId: number): Promise<RestaurantUser | undefined> {
+    const [ru] = await db
+      .select()
+      .from(restaurantUsers)
+      .where(
+        and(
+          eq(restaurantUsers.userId, userId),
+          eq(restaurantUsers.restaurantId, restaurantId)
+        )
+      );
+    return ru;
   }
 }
 

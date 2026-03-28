@@ -6,27 +6,32 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import Dashboard from "@/pages/dashboard";
 import Landing from "@/pages/landing";
+import RestaurantLogin from "@/pages/restaurant-login";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-500">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Landing />;
-  }
-
   return (
     <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route component={NotFound} />
+      {/* Restaurant login — always accessible, no Replit auth required */}
+      <Route path="/:restaurantSlug/login" component={RestaurantLogin} />
+
+      {/* All other routes require Replit auth */}
+      <Route>
+        {isLoading ? (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="text-gray-500">Loading…</div>
+          </div>
+        ) : !isAuthenticated ? (
+          <Landing />
+        ) : (
+          <Switch>
+            <Route path="/" component={Dashboard} />
+            <Route component={NotFound} />
+          </Switch>
+        )}
+      </Route>
     </Switch>
   );
 }
