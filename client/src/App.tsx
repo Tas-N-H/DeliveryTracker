@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import Dashboard from "@/pages/dashboard";
 import Landing from "@/pages/landing";
 import RestaurantLogin from "@/pages/restaurant-login";
+import RestaurantDashboard from "@/pages/restaurant-dashboard-placeholder";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -14,10 +15,11 @@ function Router() {
 
   return (
     <Switch>
-      {/* Restaurant login — always accessible, no Replit auth required */}
+      {/* ── Restaurant routes — bypasses Replit auth entirely ── */}
       <Route path="/:restaurantSlug/login" component={RestaurantLogin} />
+      <Route path="/:restaurantSlug/dashboard" component={RestaurantDashboard} />
 
-      {/* All other routes require Replit auth */}
+      {/* ── Main app routes — protected by Replit auth ── */}
       <Route>
         {isLoading ? (
           <div className="min-h-screen flex items-center justify-center bg-gray-50">
