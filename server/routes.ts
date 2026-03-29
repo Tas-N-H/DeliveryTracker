@@ -1,25 +1,20 @@
-import type { Express, RequestHandler } from "express";
+import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrderSchema } from "@shared/schema";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import {
+  requireRestaurantSession,
+  requirePermission,
+} from "./middleware/permissions";
 import { z } from "zod";
 import bcrypt from "bcrypt";
-
-// ── Restaurant session middleware ─────────────────────────────────────────────
-
-export const isRestaurantAuthenticated: RequestHandler = (req, res, next) => {
-  if (!req.session.restaurantSession) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  // ── Restaurant auth ─────────────────────────────────────────────────────────
+  // ── Restaurant auth (public) ─────────────────────────────────────────────────
 
   // POST /api/:restaurantSlug/login
   app.post("/api/:restaurantSlug/login", async (req, res) => {
@@ -30,26 +25,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(401).json({ message: "Unauthorised access" });
 
     try {
-      // 1. Look up restaurant
       const restaurant = await storage.getRestaurantBySlug(restaurantSlug);
       if (!restaurant) {
         return res.status(404).json({ message: "Restaurant not found" });
       }
 
-      // 2. Find user by email
       if (!email || !password) return unauthorized();
       const user = await storage.getUserByEmail(email.trim().toLowerCase());
       if (!user) return unauthorized();
 
-      // 3. Verify password
       const passwordValid = await bcrypt.compare(password, user.passwordHash);
       if (!passwordValid) return unauthorized();
 
-      // 4. Check restaurant membership
       const membership = await storage.getRestaurantUser(user.id, restaurant.id);
       if (!membership) return unauthorized();
 
-      // 5. Create session
       req.session.restaurantSession = {
         userId: user.id,
         role: membership.role,
@@ -73,21 +63,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/:restaurantSlug/logout
-  app.post("/api/:restaurantSlug/logout", (req, res) => {
-    req.session.restaurantSession = undefined;
-    req.session.save(() => res.json({ ok: true }));
-  });
-
-  // GET /api/:restaurantSlug/me — returns current session for this restaurant
-  app.get("/api/:restaurantSlug/me", (req, res) => {
-    const session = req.session.restaurantSession;
-    if (!session || session.restaurantSlug !== req.params.restaurantSlug) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    return res.json(session);
-  });
-
   // GET /api/:restaurantSlug/info — public: confirms the restaurant exists
   app.get("/api/:restaurantSlug/info", async (req, res) => {
     try {
@@ -101,7 +76,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Orders ──────────────────────────────────────────────────────────────────
+  // ── Restaurant auth (session required) ──────────────────────────────────────
+
+  // GET /api/:restaurantSlug/me
+  app.get("/api/:restaurantSlug/me",
+    requireRestaurantSession,
+    (req, res) => {
+      res.json(req.session.restaurantSession);
+    }
+  );
+
+  // POST /api/:restaurantSlug/logout
+  app.post("/api/:restaurantSlug/logout",
+    requireRestaurantSession,
+    (req, res) => {
+      req.session.restaurantSession = undefined;
+      req.session.save(() => res.json({ ok: true }));
+    }
+  );
+
+  // ── Permission-gated restaurant routes ───────────────────────────────────────
+  // All routes below require:
+  //   1. requireRestaurantSession  — valid session for this restaurant
+  //   2. requirePermission(action) — role allowed to perform this action
+
+  // view_orders → owner, manager, employee
+  app.get("/api/:restaurantSlug/orders",
+    requireRestaurantSession,
+    requirePermission("view_orders"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "view_orders" });
+    }
+  );
+
+  // assign_order → owner, manager, employee
+  app.post("/api/:restaurantSlug/orders/:orderId/assign",
+    requireRestaurantSession,
+    requirePermission("assign_order"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "assign_order" });
+    }
+  );
+
+  // view_own_orders → driver only
+  app.get("/api/:restaurantSlug/driver/orders",
+    requireRestaurantSession,
+    requirePermission("view_own_orders"),
+    async (req, res) => {
+      const { userId } = req.session.restaurantSession!;
+      res.json({ ok: true, permission: "view_own_orders", driverId: userId });
+    }
+  );
+
+  // update_delivery_status → driver only
+  app.patch("/api/:restaurantSlug/orders/:orderId/delivery-status",
+    requireRestaurantSession,
+    requirePermission("update_delivery_status"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "update_delivery_status" });
+    }
+  );
+
+  // manage_staff → owner, manager
+  app.post("/api/:restaurantSlug/staff",
+    requireRestaurantSession,
+    requirePermission("manage_staff"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "manage_staff" });
+    }
+  );
+
+  app.delete("/api/:restaurantSlug/staff/:userId",
+    requireRestaurantSession,
+    requirePermission("manage_staff"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "manage_staff" });
+    }
+  );
+
+  // view_analytics → owner, manager
+  app.get("/api/:restaurantSlug/analytics",
+    requireRestaurantSession,
+    requirePermission("view_analytics"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "view_analytics" });
+    }
+  );
+
+  // manage_settings → owner only
+  app.put("/api/:restaurantSlug/settings",
+    requireRestaurantSession,
+    requirePermission("manage_settings"),
+    async (_req, res) => {
+      res.json({ ok: true, permission: "manage_settings" });
+    }
+  );
+
+  // ── Main app orders (Replit auth) ─────────────────────────────────────────────
 
   app.get("/api/orders", isAuthenticated, async (req, res) => {
     try {
@@ -153,11 +224,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.markOrderAsDelivered(id);
-
       if (!success) {
         return res.status(404).json({ error: "Order not found" });
       }
-
       res.status(204).send();
     } catch (error) {
       console.error("Error marking order as delivered:", error);
@@ -185,43 +254,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Geocoding ───────────────────────────────────────────────────────────────
-
   app.post("/api/geocode", isAuthenticated, async (req, res) => {
     try {
       const { address } = req.body;
-
       if (!address) {
         return res.status(400).json({ error: "Address is required" });
       }
 
       const postcodeMatch = address.match(/([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][ABD-HJLNP-UW-Z]{2})/i);
-
       if (postcodeMatch) {
-        const postcode = postcodeMatch[1].replace(/\s+/g, ' ').trim();
-        const postcodeResponse = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
-        const postcodeData = await postcodeResponse.json();
-
-        if (postcodeData.status === 200 && postcodeData.result) {
+        const postcode = postcodeMatch[1].replace(/\s+/g, " ").trim();
+        const r = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+        const d = await r.json();
+        if (d.status === 200 && d.result) {
           return res.json({
-            latitude: postcodeData.result.latitude.toString(),
-            longitude: postcodeData.result.longitude.toString(),
+            latitude: d.result.latitude.toString(),
+            longitude: d.result.longitude.toString(),
           });
         }
       }
 
-      const response = await fetch(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(address)}`);
-      const data = await response.json();
-
-      if (data.status === 200 && data.result && data.result.length > 0) {
-        const result = data.result[0];
-        res.json({
-          latitude: result.latitude.toString(),
-          longitude: result.longitude.toString(),
+      const r = await fetch(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(address)}`);
+      const d = await r.json();
+      if (d.status === 200 && d.result?.length > 0) {
+        return res.json({
+          latitude: d.result[0].latitude.toString(),
+          longitude: d.result[0].longitude.toString(),
         });
-      } else {
-        res.json({ latitude: "51.4000", longitude: "0.5500" });
       }
+
+      res.json({ latitude: "51.4000", longitude: "0.5500" });
     } catch (error) {
       console.error("Error geocoding address:", error);
       res.json({ latitude: "51.4000", longitude: "0.5500" });
