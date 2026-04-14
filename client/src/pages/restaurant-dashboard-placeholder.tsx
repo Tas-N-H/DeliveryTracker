@@ -11,6 +11,11 @@ interface RestaurantSession {
   restaurantSlug: string;
 }
 
+interface RestaurantInfo {
+  name: string;
+  slug: string;
+}
+
 export default function RestaurantDashboardPlaceholder() {
   const { restaurantSlug } = useParams<{ restaurantSlug: string }>();
   const [, navigate] = useLocation();
@@ -22,6 +27,17 @@ export default function RestaurantDashboardPlaceholder() {
       if (!res.ok) throw new Error("Unauthorized");
       return res.json();
     },
+    retry: false,
+  });
+
+  const { data: restaurantInfo } = useQuery<RestaurantInfo>({
+    queryKey: ["/api", restaurantSlug, "info"],
+    queryFn: async () => {
+      const res = await fetch(`/api/${restaurantSlug}/info`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!session,
     retry: false,
   });
 
@@ -52,7 +68,7 @@ export default function RestaurantDashboardPlaceholder() {
         <h1 className="text-2xl font-bold text-gray-900 mb-1">Dashboard</h1>
         <p className="text-gray-500 text-sm mb-6">
           Logged in as <span className="font-medium text-gray-700">{session.role}</span>
-          {" "}· restaurant #{session.restaurantId}
+          {" "}· <span className="font-medium text-gray-700">{restaurantInfo?.name ?? restaurantSlug}</span>
         </p>
         <div className="bg-white border border-gray-200 rounded-2xl p-6 text-sm text-gray-500 mb-6">
           Dashboard coming soon.

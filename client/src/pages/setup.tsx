@@ -148,6 +148,7 @@ export default function Setup() {
                     <FormControl>
                       <Input
                         placeholder="China Village"
+                        autoComplete="off"
                         {...field}
                         onBlur={() => { field.onBlur(); handleNameBlur(); }}
                       />
@@ -172,6 +173,7 @@ export default function Setup() {
                         <Input
                           className="rounded-l-none"
                           placeholder="china-village"
+                          autoComplete="off"
                           {...field}
                           onChange={(e) =>
                             field.onChange(
@@ -204,7 +206,7 @@ export default function Setup() {
                       <Input
                         type="email"
                         placeholder="you@example.com"
-                        autoComplete="email"
+                        autoComplete="off"
                         {...field}
                       />
                     </FormControl>
@@ -224,7 +226,7 @@ export default function Setup() {
                       <Input
                         type="password"
                         placeholder="••••••••"
-                        autoComplete="new-password"
+                        autoComplete="off"
                         {...field}
                       />
                     </FormControl>
@@ -244,7 +246,7 @@ export default function Setup() {
                       <Input
                         type="password"
                         placeholder="••••••••"
-                        autoComplete="new-password"
+                        autoComplete="off"
                         {...field}
                       />
                     </FormControl>
