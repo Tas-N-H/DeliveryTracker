@@ -11,7 +11,8 @@ export type Permission =
   | "update_delivery_status"   // mark order in-transit / delivered
   | "manage_staff"             // add or remove staff members
   | "view_analytics"           // view reports and analytics
-  | "manage_settings";         // change restaurant settings
+  | "manage_settings"          // change restaurant settings
+  | "view_active_drivers";     // see who is active/available today
 
 // ── Permission matrix ─────────────────────────────────────────────────────────
 // Each permission lists the roles that are ALLOWED to perform it.
@@ -24,6 +25,7 @@ const PERMISSION_MATRIX: Record<Permission, RestaurantRole[]> = {
   manage_staff:            ["owner", "manager"],
   view_analytics:          ["owner", "manager"],
   manage_settings:         ["owner"],
+  view_active_drivers:     ["owner", "manager", "employee"],
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

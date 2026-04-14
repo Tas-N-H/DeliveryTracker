@@ -51,6 +51,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         req.session.save((err) => (err ? reject(err) : resolve()))
       );
 
+      // Mark driver as active for today when they log in
+      if (membership.role === "driver") {
+        await storage.upsertDriverSession(user.id, restaurant.id);
+      }
+
       return res.json({
         userId: user.id,
         role: membership.role,
@@ -89,7 +94,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/:restaurantSlug/logout
   app.post("/api/:restaurantSlug/logout",
     requireRestaurantSession,
-    (req, res) => {
+    async (req, res) => {
+      const session = req.session.restaurantSession!;
+
+      // Mark driver as inactive when they log out
+      if (session.role === "driver") {
+        await storage.deactivateDriverSession(session.userId, session.restaurantId);
+      }
+
       req.session.restaurantSession = undefined;
       req.session.save(() => res.json({ ok: true }));
     }
@@ -169,6 +181,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requirePermission("manage_settings"),
     async (_req, res) => {
       res.json({ ok: true, permission: "manage_settings" });
+    }
+  );
+
+  // view_active_drivers → owner, manager, employee
+  app.get("/api/:restaurantSlug/active-drivers",
+    requireRestaurantSession,
+    requirePermission("view_active_drivers"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const drivers = await storage.getActiveDrivers(restaurantId);
+        res.json(drivers);
+      } catch (error) {
+        console.error("Error fetching active drivers:", error);
+        res.status(500).json({ message: "Failed to fetch active drivers" });
+      }
     }
   );
 

@@ -1,5 +1,5 @@
 export * from "./models/auth";
-import { pgTable, text, serial, timestamp, integer, varchar, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, varchar, pgEnum, boolean, date, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -66,6 +66,21 @@ export const restaurantUsers = pgTable("restaurant_users", {
   role: restaurantRoleEnum("role").notNull(),
 });
 
+// Driver availability sessions
+export const driverSessions = pgTable("driver_sessions", {
+  id: serial("id").primaryKey(),
+  driverId: integer("driver_id")
+    .notNull()
+    .references(() => users.id),
+  restaurantId: integer("restaurant_id")
+    .notNull()
+    .references(() => restaurants.id),
+  date: date("date").notNull().defaultNow(),
+  isActive: boolean("is_active").notNull().default(true),
+}, (t) => [
+  unique("driver_sessions_driver_restaurant_date_unique").on(t.driverId, t.restaurantId, t.date),
+]);
+
 // ── Insert schemas ────────────────────────────────────────────────────────────
 
 export const insertOrderSchema = createInsertSchema(orders).omit({
@@ -92,6 +107,10 @@ export const insertRestaurantUserSchema = createInsertSchema(restaurantUsers).om
   id: true,
 });
 
+export const insertDriverSessionSchema = createInsertSchema(driverSessions).omit({
+  id: true,
+});
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
@@ -108,3 +127,6 @@ export type AppUser = typeof users.$inferSelect;
 
 export type InsertRestaurantUser = z.infer<typeof insertRestaurantUserSchema>;
 export type RestaurantUser = typeof restaurantUsers.$inferSelect;
+
+export type InsertDriverSession = z.infer<typeof insertDriverSessionSchema>;
+export type DriverSession = typeof driverSessions.$inferSelect;

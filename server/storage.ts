@@ -4,15 +4,17 @@ import {
   restaurants,
   users,
   restaurantUsers,
+  driverSessions,
   type Order,
   type InsertOrder,
   type DeliveredOrder,
   type Restaurant,
   type AppUser,
   type RestaurantUser,
+  type DriverSession,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, gte, and } from "drizzle-orm";
+import { eq, gte, and, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Orders
@@ -29,6 +31,11 @@ export interface IStorage {
   getRestaurantBySlug(slug: string): Promise<Restaurant | undefined>;
   getUserByEmail(email: string): Promise<AppUser | undefined>;
   getRestaurantUser(userId: number, restaurantId: number): Promise<RestaurantUser | undefined>;
+
+  // Driver sessions
+  upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession>;
+  deactivateDriverSession(driverId: number, restaurantId: number): Promise<void>;
+  getActiveDrivers(restaurantId: number): Promise<{ driverId: number; email: string }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -118,6 +125,51 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return ru;
+  }
+
+  // ── Driver sessions ──────────────────────────────────────────────────────────
+
+  async upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession> {
+    const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const [session] = await db
+      .insert(driverSessions)
+      .values({ driverId, restaurantId, date: today, isActive: true })
+      .onConflictDoUpdate({
+        target: [driverSessions.driverId, driverSessions.restaurantId, driverSessions.date],
+        set: { isActive: true },
+      })
+      .returning();
+    return session;
+  }
+
+  async deactivateDriverSession(driverId: number, restaurantId: number): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    await db
+      .update(driverSessions)
+      .set({ isActive: false })
+      .where(
+        and(
+          eq(driverSessions.driverId, driverId),
+          eq(driverSessions.restaurantId, restaurantId),
+          eq(driverSessions.date, today)
+        )
+      );
+  }
+
+  async getActiveDrivers(restaurantId: number): Promise<{ driverId: number; email: string }[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await db
+      .select({ driverId: driverSessions.driverId, email: users.email })
+      .from(driverSessions)
+      .innerJoin(users, eq(driverSessions.driverId, users.id))
+      .where(
+        and(
+          eq(driverSessions.restaurantId, restaurantId),
+          eq(driverSessions.date, today),
+          eq(driverSessions.isActive, true)
+        )
+      );
+    return rows;
   }
 }
 
