@@ -1,6 +1,5 @@
-import { useEffect } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -41,18 +40,6 @@ type SetupForm = z.infer<typeof setupSchema>;
 
 export default function Setup() {
   const [, navigate] = useLocation();
-
-  const { data: status, isLoading: checkingStatus } = useQuery<{ available: boolean }>({
-    queryKey: ["/api/setup/status"],
-    retry: false,
-  });
-
-  useEffect(() => {
-    if (!checkingStatus && status && !status.available) {
-      // Setup already done — send to root (which handles auth routing)
-      navigate("/");
-    }
-  }, [checkingStatus, status, navigate]);
 
   const form = useForm<SetupForm>({
     resolver: zodResolver(setupSchema),
@@ -107,17 +94,6 @@ export default function Setup() {
       if (derived) form.setValue("slug", derived, { shouldValidate: true });
     }
   };
-
-  if (checkingStatus) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-      </div>
-    );
-  }
-
-  // If setup is unavailable the useEffect will redirect; show nothing while that happens
-  if (status && !status.available) return null;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
@@ -281,8 +257,8 @@ export default function Setup() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          This page is only accessible until a restaurant has been created.
-          Future staff accounts are managed from within the dashboard.
+          Each restaurant gets its own private workspace.
+          Staff accounts are managed from within the dashboard.
         </p>
       </div>
     </div>

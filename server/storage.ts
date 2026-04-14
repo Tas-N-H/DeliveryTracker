@@ -14,7 +14,7 @@ import {
   type DriverSession,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, gte, and, sql } from "drizzle-orm";
+import { eq, gte, and } from "drizzle-orm";
 
 export interface IStorage {
   // Orders
@@ -31,7 +31,6 @@ export interface IStorage {
   getRestaurantBySlug(slug: string): Promise<Restaurant | undefined>;
   getUserByEmail(email: string): Promise<AppUser | undefined>;
   getRestaurantUser(userId: number, restaurantId: number): Promise<RestaurantUser | undefined>;
-  countRestaurants(): Promise<number>;
   createRestaurantWithOwner(params: {
     restaurantName: string;
     slug: string;
@@ -132,11 +131,6 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return ru;
-  }
-
-  async countRestaurants(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)` }).from(restaurants);
-    return Number(result[0].count);
   }
 
   async createRestaurantWithOwner(params: {

@@ -14,27 +14,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  // ── One-time setup ───────────────────────────────────────────────────────────
+  // ── Restaurant registration (open to anyone) ─────────────────────────────────
 
-  // GET /api/setup/status — returns whether setup is still available
-  app.get("/api/setup/status", async (_req, res) => {
-    try {
-      const count = await storage.countRestaurants();
-      res.json({ available: count === 0 });
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-  });
-
-  // POST /api/setup — create restaurant + owner, then log them in
+  // POST /api/setup — create a new restaurant + owner account, then log them in
   app.post("/api/setup", async (req, res) => {
     try {
-      // Block if a restaurant already exists
-      const count = await storage.countRestaurants();
-      if (count > 0) {
-        return res.status(403).json({ message: "Setup has already been completed" });
-      }
-
       const setupSchema = z.object({
         restaurantName: z.string().min(1),
         slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug must be lowercase with hyphens only"),
@@ -79,7 +63,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error?.code === "23505") {
         const detail: string = error.detail ?? "";
         if (detail.includes("slug")) {
-          return res.status(409).json({ message: "That restaurant URL is already taken" });
+          return res.status(409).json({ message: "This URL is already taken" });
         }
         if (detail.includes("email")) {
           return res.status(409).json({ message: "An account with that email already exists" });
