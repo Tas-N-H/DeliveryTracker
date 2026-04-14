@@ -31,6 +31,13 @@ export interface IStorage {
   getRestaurantBySlug(slug: string): Promise<Restaurant | undefined>;
   getUserByEmail(email: string): Promise<AppUser | undefined>;
   getRestaurantUser(userId: number, restaurantId: number): Promise<RestaurantUser | undefined>;
+  countRestaurants(): Promise<number>;
+  createRestaurantWithOwner(params: {
+    restaurantName: string;
+    slug: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<{ restaurant: Restaurant; user: AppUser }>;
 
   // Driver sessions
   upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession>;
@@ -125,6 +132,36 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return ru;
+  }
+
+  async countRestaurants(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(restaurants);
+    return Number(result[0].count);
+  }
+
+  async createRestaurantWithOwner(params: {
+    restaurantName: string;
+    slug: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<{ restaurant: Restaurant; user: AppUser }> {
+    return await db.transaction(async (tx) => {
+      const [restaurant] = await tx
+        .insert(restaurants)
+        .values({ name: params.restaurantName, slug: params.slug })
+        .returning();
+
+      const [user] = await tx
+        .insert(users)
+        .values({ email: params.email, passwordHash: params.passwordHash })
+        .returning();
+
+      await tx
+        .insert(restaurantUsers)
+        .values({ userId: user.id, restaurantId: restaurant.id, role: "owner" });
+
+      return { restaurant, user };
+    });
   }
 
   // ── Driver sessions ──────────────────────────────────────────────────────────

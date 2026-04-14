@@ -14,6 +14,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
 
+  // ── One-time setup ───────────────────────────────────────────────────────────
+
+  // GET /api/setup/status — returns whether setup is still available
+  app.get("/api/setup/status", async (_req, res) => {
+    try {
+      const count = await storage.countRestaurants();
+      res.json({ available: count === 0 });
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
+  // POST /api/setup — create restaurant + owner, then log them in
+  app.post("/api/setup", async (req, res) => {
+    try {
+      // Block if a restaurant already exists
+      const count = await storage.countRestaurants();
+      if (count > 0) {
+        return res.status(403).json({ message: "Setup has already been completed" });
+      }
+
+      const setupSchema = z.object({
+        restaurantName: z.string().min(1),
+        slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug must be lowercase with hyphens only"),
+        email: z.string().email(),
+        password: z.string().min(8),
+      });
+
+      const parsed = setupSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+      }
+
+      const { restaurantName, slug, email, password } = parsed.data;
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      const { restaurant, user } = await storage.createRestaurantWithOwner({
+        restaurantName,
+        slug,
+        email,
+        passwordHash,
+      });
+
+      // Auto-login: create a restaurant session for the new owner
+      req.session.restaurantSession = {
+        userId: user.id,
+        role: "owner",
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+      };
+
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => (err ? reject(err) : resolve()))
+      );
+
+      return res.status(201).json({
+        restaurantSlug: restaurant.slug,
+        userId: user.id,
+        role: "owner",
+      });
+    } catch (error: any) {
+      // Unique constraint violation (slug or email already taken)
+      if (error?.code === "23505") {
+        const detail: string = error.detail ?? "";
+        if (detail.includes("slug")) {
+          return res.status(409).json({ message: "That restaurant URL is already taken" });
+        }
+        if (detail.includes("email")) {
+          return res.status(409).json({ message: "An account with that email already exists" });
+        }
+        return res.status(409).json({ message: "A duplicate record already exists" });
+      }
+      console.error("Setup error:", error);
+      return res.status(500).json({ message: "Setup failed" });
+    }
+  });
+
   // ── Restaurant auth (public) ─────────────────────────────────────────────────
 
   // POST /api/:restaurantSlug/login
