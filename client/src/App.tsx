@@ -8,7 +8,7 @@ import Dashboard from "@/pages/dashboard";
 import Landing from "@/pages/landing";
 import Setup from "@/pages/setup";
 import RestaurantLogin from "@/pages/restaurant-login";
-import RestaurantDashboard from "@/pages/restaurant-dashboard-placeholder";
+import RestaurantDashboard from "@/pages/restaurant-dashboard";
 import NotFound from "@/pages/not-found";
 
 function Router() {

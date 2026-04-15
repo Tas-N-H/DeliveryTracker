@@ -6,6 +6,7 @@ export type RestaurantRole = "owner" | "manager" | "employee" | "driver";
 
 export type Permission =
   | "view_orders"              // see all orders for this restaurant
+  | "manage_orders"            // create, update status, delete orders
   | "assign_order"             // assign an order to a driver
   | "view_own_orders"          // see only orders assigned to self
   | "update_delivery_status"   // mark order in-transit / delivered
@@ -19,6 +20,7 @@ export type Permission =
 
 const PERMISSION_MATRIX: Record<Permission, RestaurantRole[]> = {
   view_orders:             ["owner", "manager", "employee"],
+  manage_orders:           ["owner", "manager", "employee"],
   assign_order:            ["owner", "manager", "employee"],
   view_own_orders:         ["driver"],
   update_delivery_status:  ["driver"],

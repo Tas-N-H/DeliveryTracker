@@ -6,6 +6,8 @@ import { z } from "zod";
 // Orders table
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
+  restaurantId: integer("restaurant_id"),
+  assignedDriverId: integer("assigned_driver_id"),
   orderNumber: text("order_number").notNull(),
   address: text("address").notNull(),
   platform: text("platform").notNull(),
@@ -18,6 +20,7 @@ export const orders = pgTable("orders", {
 // Delivered orders table
 export const deliveredOrders = pgTable("delivered_orders", {
   id: serial("id").primaryKey(),
+  restaurantId: integer("restaurant_id"),
   orderNumber: text("order_number").notNull(),
   address: text("address").notNull(),
   platform: text("platform").notNull(),

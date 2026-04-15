@@ -14,6 +14,7 @@ import Tesseract from 'tesseract.js';
 
 interface ReceiptScannerProps {
   onOrderCreated: () => void;
+  apiPath?: string;
 }
 
 interface ExtractedOrderData {
@@ -22,7 +23,7 @@ interface ExtractedOrderData {
   platform: string;
 }
 
-export function ReceiptScanner({ onOrderCreated }: ReceiptScannerProps) {
+export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: ReceiptScannerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedOrderData | null>(null);
@@ -31,9 +32,11 @@ export function ReceiptScanner({ onOrderCreated }: ReceiptScannerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
+  const geocodePath = apiPath.replace(/\/orders$/, "/geocode");
+
   const createOrderMutation = useMutation({
     mutationFn: async (orderData: any) => {
-      const response = await apiRequest("POST", "/api/orders", orderData);
+      const response = await apiRequest("POST", apiPath, orderData);
       return response;
     },
     onSuccess: () => {
@@ -198,8 +201,8 @@ export function ReceiptScanner({ onOrderCreated }: ReceiptScannerProps) {
     if (!extractedData) return;
 
     try {
-      // Geocode the address
-      const geocode = await geocodeAddress(extractedData.address);
+      const geocodeRes = await apiRequest("POST", geocodePath, { address: extractedData.address });
+      const geocode = await geocodeRes.json();
       
       const orderData = {
         orderNumber: extractedData.orderNumber,

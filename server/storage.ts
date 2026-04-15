@@ -17,7 +17,7 @@ import { db } from "./db";
 import { eq, gte, and } from "drizzle-orm";
 
 export interface IStorage {
-  // Orders
+  // Orders (main app – Replit auth)
   getOrders(): Promise<Order[]>;
   getOrder(id: number): Promise<Order | undefined>;
   createOrder(order: InsertOrder): Promise<Order>;
@@ -42,6 +42,16 @@ export interface IStorage {
   upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession>;
   deactivateDriverSession(driverId: number, restaurantId: number): Promise<void>;
   getActiveDrivers(restaurantId: number): Promise<{ driverId: number; email: string }[]>;
+
+  // Restaurant-scoped orders
+  getRestaurantOrders(restaurantId: number): Promise<Order[]>;
+  getRestaurantOrder(restaurantId: number, orderId: number): Promise<Order | undefined>;
+  createRestaurantOrder(data: InsertOrder & { restaurantId: number }): Promise<Order>;
+  updateRestaurantOrderStatus(restaurantId: number, orderId: number, status: string): Promise<Order | undefined>;
+  assignOrderToDriver(restaurantId: number, orderId: number, driverId: number | null): Promise<Order | undefined>;
+  markRestaurantOrderDelivered(restaurantId: number, orderId: number): Promise<boolean>;
+  getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]>;
+  getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -161,7 +171,7 @@ export class DatabaseStorage implements IStorage {
   // ── Driver sessions ──────────────────────────────────────────────────────────
 
   async upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession> {
-    const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const today = new Date().toISOString().slice(0, 10);
     const [session] = await db
       .insert(driverSessions)
       .values({ driverId, restaurantId, date: today, isActive: true })
@@ -201,6 +211,93 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return rows;
+  }
+
+  // ── Restaurant-scoped orders ─────────────────────────────────────────────────
+
+  async getRestaurantOrders(restaurantId: number): Promise<Order[]> {
+    return await db
+      .select()
+      .from(orders)
+      .where(eq(orders.restaurantId, restaurantId))
+      .orderBy(orders.createdAt);
+  }
+
+  async getRestaurantOrder(restaurantId: number, orderId: number): Promise<Order | undefined> {
+    const [order] = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.restaurantId, restaurantId)));
+    return order;
+  }
+
+  async createRestaurantOrder(data: InsertOrder & { restaurantId: number }): Promise<Order> {
+    const [order] = await db.insert(orders).values(data).returning();
+    return order;
+  }
+
+  async updateRestaurantOrderStatus(restaurantId: number, orderId: number, status: string): Promise<Order | undefined> {
+    const [order] = await db
+      .update(orders)
+      .set({ status })
+      .where(and(eq(orders.id, orderId), eq(orders.restaurantId, restaurantId)))
+      .returning();
+    return order;
+  }
+
+  async assignOrderToDriver(restaurantId: number, orderId: number, driverId: number | null): Promise<Order | undefined> {
+    const [order] = await db
+      .update(orders)
+      .set({ assignedDriverId: driverId })
+      .where(and(eq(orders.id, orderId), eq(orders.restaurantId, restaurantId)))
+      .returning();
+    return order;
+  }
+
+  async markRestaurantOrderDelivered(restaurantId: number, orderId: number): Promise<boolean> {
+    const order = await this.getRestaurantOrder(restaurantId, orderId);
+    if (!order) return false;
+
+    await db.insert(deliveredOrders).values({
+      restaurantId: order.restaurantId,
+      orderNumber: order.orderNumber,
+      address: order.address,
+      platform: order.platform,
+      latitude: order.latitude,
+      longitude: order.longitude,
+      originalOrderId: order.id,
+    });
+
+    await this.deleteOrder(order.id);
+    return true;
+  }
+
+  async getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return await db
+      .select()
+      .from(deliveredOrders)
+      .where(
+        and(
+          eq(deliveredOrders.restaurantId, restaurantId),
+          gte(deliveredOrders.deliveredAt, today)
+        )
+      )
+      .orderBy(deliveredOrders.deliveredAt);
+  }
+
+  async getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]> {
+    return await db
+      .select()
+      .from(orders)
+      .where(
+        and(
+          eq(orders.restaurantId, restaurantId),
+          eq(orders.assignedDriverId, driverId)
+        )
+      )
+      .orderBy(orders.createdAt);
   }
 }
 

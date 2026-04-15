@@ -1,0 +1,842 @@
+import { useState, useEffect } from "react";
+import { useParams, useLocation } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { MapContainer } from "@/components/map-container";
+import { ReceiptScanner } from "@/components/receipt-scanner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import {
+  Plus,
+  LogOut,
+  MapPin,
+  Navigation,
+  ChefHat,
+  Package,
+  Truck,
+  CheckCircle2,
+  BarChart3,
+  UtensilsCrossed,
+  Loader2,
+} from "lucide-react";
+import { SiUbereats, SiJusteat } from "react-icons/si";
+import type { Order } from "@shared/schema";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface RestaurantSession {
+  userId: number;
+  role: string;
+  restaurantId: number;
+  restaurantSlug: string;
+}
+
+interface ActiveDriver {
+  driverId: number;
+  email: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const STATUS_CONFIG: Record<string, { color: string; bgClass: string; dotClass: string; label: string }> = {
+  cooking:    { color: "#F44336", bgClass: "bg-red-100 text-red-700",    dotClass: "bg-red-500",    label: "Cooking"    },
+  packed:     { color: "#2196F3", bgClass: "bg-blue-100 text-blue-700",  dotClass: "bg-blue-500",   label: "Packed"     },
+  "in-transit": { color: "#FF9800", bgClass: "bg-orange-100 text-orange-700", dotClass: "bg-orange-500", label: "In Transit" },
+  delivered:  { color: "#4CAF50", bgClass: "bg-green-100 text-green-700", dotClass: "bg-green-500", label: "Delivered"  },
+};
+
+function formatPlatform(p: string) {
+  switch (p) {
+    case "uber-eats": return "Uber Eats";
+    case "just-eat":  return "Just Eat";
+    case "phone":     return "Phone Order";
+    case "website":   return "Website";
+    case "direct":    return "Direct";
+    default:          return p;
+  }
+}
+
+function PlatformIcon({ platform }: { platform: string }) {
+  switch (platform) {
+    case "uber-eats": return <SiUbereats className="w-4 h-4 text-black shrink-0" />;
+    case "just-eat":  return <SiJusteat className="w-4 h-4 text-orange-500 shrink-0" />;
+    default:          return <UtensilsCrossed className="w-4 h-4 text-gray-400 shrink-0" />;
+  }
+}
+
+// ── Add Order Modal ───────────────────────────────────────────────────────────
+
+const addOrderSchema = z.object({
+  orderNumber: z.string().min(1, "Order number is required"),
+  address: z.string()
+    .min(10, "Enter a complete address with postcode")
+    .refine(a => /([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][ABD-HJLNP-UW-Z]{2})/i.test(a), {
+      message: "Address must include a valid UK postcode (e.g. ME4 4EZ)",
+    }),
+  platform: z.string().min(1, "Platform is required"),
+  status: z.string().default("cooking"),
+  latitude: z.string().optional().default(""),
+  longitude: z.string().optional().default(""),
+});
+
+type AddOrderForm = z.infer<typeof addOrderSchema>;
+
+function AddOrderModal({
+  open,
+  onClose,
+  restaurantSlug,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  restaurantSlug: string;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [isGeocoding, setIsGeocoding] = useState(false);
+
+  const form = useForm<AddOrderForm>({
+    resolver: zodResolver(addOrderSchema),
+    defaultValues: {
+      orderNumber: "",
+      address: "",
+      platform: "",
+      status: "cooking",
+      latitude: "",
+      longitude: "",
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: AddOrderForm) => {
+      setIsGeocoding(true);
+      try {
+        const geoRes = await apiRequest("POST", `/api/${restaurantSlug}/geocode`, { address: data.address });
+        const coords = await geoRes.json();
+        const res = await apiRequest("POST", `/api/${restaurantSlug}/orders`, {
+          ...data,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
+        return res.json();
+      } finally {
+        setIsGeocoding(false);
+      }
+    },
+    onSuccess: () => {
+      toast({ title: "Order added", description: "New order added to the map." });
+      form.reset();
+      onSuccess();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add order.", variant: "destructive" });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={() => { form.reset(); onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add New Order</DialogTitle>
+          <DialogDescription>Enter the order details to add it to the delivery map</DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(d => createMutation.mutate(d))} className="space-y-4">
+            <FormField control={form.control} name="orderNumber" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Order Number</FormLabel>
+                <FormControl><Input placeholder="e.g. UE2024013" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="address" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Delivery Address</FormLabel>
+                <FormControl>
+                  <Textarea placeholder="Full address with postcode, e.g. 12 High Street, London SW1A 1AA" rows={3} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="platform" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Platform</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger><SelectValue placeholder="Select platform" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="uber-eats">Uber Eats</SelectItem>
+                    <SelectItem value="just-eat">Just Eat</SelectItem>
+                    <SelectItem value="direct">Direct</SelectItem>
+                    <SelectItem value="phone">Phone Order</SelectItem>
+                    <SelectItem value="website">Website</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <div className="flex gap-3 pt-2">
+              <Button type="button" variant="outline" className="flex-1" onClick={() => { form.reset(); onClose(); }}>Cancel</Button>
+              <Button type="submit" className="flex-1" disabled={createMutation.isPending || isGeocoding}>
+                {isGeocoding ? "Locating…" : createMutation.isPending ? "Adding…" : "Add Order"}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Staff Order Card ──────────────────────────────────────────────────────────
+
+function StaffOrderCard({
+  order,
+  drivers,
+  restaurantSlug,
+  isSelected,
+  onSelect,
+  onRefetch,
+}: {
+  order: Order;
+  drivers: ActiveDriver[];
+  restaurantSlug: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onRefetch: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG["cooking"];
+
+  const [pendingDriver, setPendingDriver] = useState<string>(
+    order.assignedDriverId?.toString() ?? ""
+  );
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/orders`] });
+    queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/orders/delivered/today`] });
+    onRefetch();
+  };
+
+  const statusMutation = useMutation({
+    mutationFn: (status: string) =>
+      apiRequest("PATCH", `/api/${restaurantSlug}/orders/${order.id}/status`, { status }).then(r => r.json()),
+    onSuccess: () => { toast({ title: "Status updated" }); invalidate(); },
+    onError: () => toast({ title: "Error", description: "Failed to update status.", variant: "destructive" }),
+  });
+
+  const deliveredMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("DELETE", `/api/${restaurantSlug}/orders/${order.id}`),
+    onSuccess: () => { toast({ title: "Order delivered", description: "Order marked as delivered." }); invalidate(); },
+    onError: () => toast({ title: "Error", description: "Failed to mark as delivered.", variant: "destructive" }),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (driverId: number | null) =>
+      apiRequest("POST", `/api/${restaurantSlug}/orders/${order.id}/assign`, { driverId }).then(r => r.json()),
+    onSuccess: () => { toast({ title: "Driver assigned" }); invalidate(); },
+    onError: () => toast({ title: "Error", description: "Failed to assign driver.", variant: "destructive" }),
+  });
+
+  const currentDriverId = order.assignedDriverId?.toString() ?? "";
+  const assignedDriver = drivers.find(d => d.driverId === order.assignedDriverId);
+  const pendingChanged = pendingDriver !== currentDriverId;
+
+  return (
+    <div
+      onClick={onSelect}
+      className={`rounded-lg border p-3 cursor-pointer transition-all bg-white ${
+        isSelected ? "border-blue-500 ring-2 ring-blue-200 shadow-md" : "border-gray-200 hover:shadow-sm"
+      }`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-2.5 h-2.5 rounded-full ${cfg.dotClass} shrink-0`} />
+          <PlatformIcon platform={order.platform} />
+          <span className="text-xs font-semibold text-gray-700">#{order.orderNumber}</span>
+        </div>
+        <Badge variant="outline" className={`text-xs px-1.5 py-0 ${cfg.bgClass} border-0`}>
+          {cfg.label}
+        </Badge>
+      </div>
+
+      {/* Address & platform */}
+      <p className="text-sm font-medium text-gray-800 leading-snug mb-0.5 line-clamp-2">{order.address}</p>
+      <p className="text-xs text-gray-500 mb-2">{formatPlatform(order.platform)}</p>
+
+      {/* Status action buttons */}
+      <div className="flex flex-wrap gap-1.5 mb-2" onClick={e => e.stopPropagation()}>
+        {order.status === "cooking" && (
+          <Button size="sm" className="h-7 text-xs bg-blue-500 hover:bg-blue-600 text-white border-0"
+            onClick={() => statusMutation.mutate("packed")}
+            disabled={statusMutation.isPending}>
+            Mark Packed
+          </Button>
+        )}
+        {order.status === "packed" && (
+          <Button size="sm" className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white border-0"
+            onClick={() => statusMutation.mutate("in-transit")}
+            disabled={statusMutation.isPending}>
+            Out for Delivery
+          </Button>
+        )}
+        {order.status === "in-transit" && (
+          <Button size="sm" className="h-7 text-xs bg-green-500 hover:bg-green-600 text-white border-0"
+            onClick={() => deliveredMutation.mutate()}
+            disabled={deliveredMutation.isPending}>
+            Mark Delivered
+          </Button>
+        )}
+      </div>
+
+      {/* Assign driver */}
+      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+        {drivers.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No active drivers</p>
+        ) : (
+          <>
+            <Select value={pendingDriver} onValueChange={setPendingDriver}>
+              <SelectTrigger className="h-7 text-xs flex-1">
+                <SelectValue placeholder="Assign driver…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Unassigned</SelectItem>
+                {drivers.map(d => (
+                  <SelectItem key={d.driverId} value={d.driverId.toString()}>
+                    {d.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {pendingChanged && (
+              <Button
+                size="sm"
+                className="h-7 text-xs shrink-0"
+                disabled={assignMutation.isPending}
+                onClick={() => {
+                  const id = pendingDriver === "none" ? null : parseInt(pendingDriver);
+                  assignMutation.mutate(id);
+                }}
+              >
+                {assignMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Assign"}
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+      {assignedDriver && !pendingChanged && (
+        <p className="text-xs text-gray-500 mt-1">
+          <span className="text-gray-400">Driver:</span> {assignedDriver.email}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Staff Sidebar ─────────────────────────────────────────────────────────────
+
+function StaffSidebar({
+  session,
+  restaurantName,
+  orders,
+  drivers,
+  deliveredToday,
+  restaurantSlug,
+  selectedOrderId,
+  onOrderSelect,
+  onAddOrder,
+  onRefetch,
+  onLogout,
+  isMobileOpen,
+  onCloseMobile,
+}: {
+  session: RestaurantSession;
+  restaurantName: string;
+  orders: Order[];
+  drivers: ActiveDriver[];
+  deliveredToday: number;
+  restaurantSlug: string;
+  selectedOrderId: number | null;
+  onOrderSelect: (id: number | null) => void;
+  onAddOrder: () => void;
+  onRefetch: () => void;
+  onLogout: () => void;
+  isMobileOpen: boolean;
+  onCloseMobile: () => void;
+}) {
+  const cooking   = orders.filter(o => o.status === "cooking").length;
+  const packed    = orders.filter(o => o.status === "packed").length;
+  const transit   = orders.filter(o => o.status === "in-transit").length;
+
+  const roleLabel = session.role.charAt(0).toUpperCase() + session.role.slice(1);
+
+  return (
+    <div className="w-full h-full bg-white shadow-lg flex flex-col border-r border-gray-200">
+      {/* Header */}
+      <div className="px-5 py-4 bg-primary text-white border-b border-blue-700">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold leading-tight truncate">{restaurantName}</h1>
+            <p className="text-blue-100 text-xs mt-0.5">{roleLabel}</p>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button variant="ghost" size="sm" onClick={onLogout}
+              className="text-white hover:bg-blue-700 hidden md:flex items-center gap-1 h-8 px-2 text-xs">
+              <LogOut className="w-3.5 h-3.5" />
+              Sign out
+            </Button>
+            <button className="md:hidden text-white hover:bg-blue-700 p-1.5 rounded" onClick={onCloseMobile}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Add Order */}
+      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <Button onClick={onAddOrder} className="w-full bg-primary hover:bg-blue-700 text-white text-sm h-9">
+          <Plus className="w-4 h-4 mr-1.5" />
+          Add New Order
+        </Button>
+      </div>
+
+      {/* Order Summary */}
+      <div className="px-4 py-3 border-b border-gray-200">
+        <div className="flex items-center gap-2 mb-2.5">
+          <BarChart3 className="w-4 h-4 text-gray-500" />
+          <h2 className="text-sm font-semibold text-gray-800">Order Summary</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { icon: ChefHat, dotClass: "bg-red-500", label: "Cooking", count: cooking },
+            { icon: Package, dotClass: "bg-blue-500", label: "Packed", count: packed },
+            { icon: Truck, dotClass: "bg-orange-500", label: "In Transit", count: transit },
+            { icon: CheckCircle2, dotClass: "bg-green-500", label: "Delivered", count: deliveredToday },
+          ].map(({ dotClass, label, count }) => (
+            <div key={label} className="flex items-center justify-between bg-gray-50 rounded-md px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <div className={`w-2 h-2 rounded-full ${dotClass}`} />
+                <span className="text-xs text-gray-600">{label}</span>
+              </div>
+              <span className="text-sm font-semibold text-gray-800">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Active Orders */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-1">Active Orders</h2>
+        {orders.length === 0 ? (
+          <div className="text-center py-10 text-gray-400">
+            <UtensilsCrossed className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No active orders</p>
+            <p className="text-xs mt-1">Add an order to get started</p>
+          </div>
+        ) : (
+          orders.map(order => (
+            <StaffOrderCard
+              key={order.id}
+              order={order}
+              drivers={drivers}
+              restaurantSlug={restaurantSlug}
+              isSelected={selectedOrderId === order.id}
+              onSelect={() => onOrderSelect(order.id)}
+              onRefetch={onRefetch}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Scan Receipt */}
+      <div className="px-4 py-3 border-t border-gray-200">
+        <ReceiptScanner
+          onOrderCreated={onRefetch}
+          apiPath={`/api/${restaurantSlug}/orders`}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Driver Order Card ─────────────────────────────────────────────────────────
+
+function DriverOrderCard({
+  order,
+  restaurantSlug,
+  onRefetch,
+}: {
+  order: Order;
+  restaurantSlug: string;
+  onRefetch: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG["cooking"];
+
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(order.address)}`;
+
+  const deliveredMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("PATCH", `/api/${restaurantSlug}/orders/${order.id}/delivery-status`, {}),
+    onSuccess: () => {
+      toast({ title: "Order delivered!", description: "Order marked as delivered." });
+      queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/driver/orders`] });
+      onRefetch();
+    },
+    onError: () => toast({ title: "Error", description: "Failed to mark as delivered.", variant: "destructive" }),
+  });
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2.5 h-2.5 rounded-full ${cfg.dotClass} shrink-0 mt-0.5`} />
+          <span className="text-sm font-semibold text-gray-800">#{order.orderNumber}</span>
+        </div>
+        <Badge variant="outline" className={`text-xs px-2 py-0.5 ${cfg.bgClass} border-0`}>
+          {cfg.label}
+        </Badge>
+      </div>
+
+      <div className="flex items-start gap-2 mb-1">
+        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+        <p className="text-sm text-gray-700 leading-snug">{order.address}</p>
+      </div>
+      <div className="flex items-center gap-1.5 mb-3">
+        <PlatformIcon platform={order.platform} />
+        <span className="text-xs text-gray-500">{formatPlatform(order.platform)}</span>
+      </div>
+
+      <div className="flex gap-2">
+        <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+          <Button variant="outline" size="sm" className="w-full h-8 text-xs gap-1.5">
+            <Navigation className="w-3.5 h-3.5" />
+            Open Maps
+          </Button>
+        </a>
+        {order.status !== "delivered" && (
+          <Button
+            size="sm"
+            className="flex-1 h-8 text-xs bg-green-500 hover:bg-green-600 text-white border-0"
+            onClick={() => deliveredMutation.mutate()}
+            disabled={deliveredMutation.isPending}
+          >
+            {deliveredMutation.isPending
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <><CheckCircle2 className="w-3.5 h-3.5 mr-1" />Mark Delivered</>
+            }
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Driver View ───────────────────────────────────────────────────────────────
+
+function DriverView({
+  session,
+  restaurantName,
+  restaurantSlug,
+  onLogout,
+}: {
+  session: RestaurantSession;
+  restaurantName: string;
+  restaurantSlug: string;
+  onLogout: () => void;
+}) {
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [selectionKey, setSelectionKey] = useState(0);
+
+  const { data: orders = [], refetch, isLoading } = useQuery<Order[]>({
+    queryKey: [`/api/${restaurantSlug}/driver/orders`],
+    refetchInterval: 30000,
+  });
+
+  const handleOrderSelect = (id: number | null) => {
+    setSelectedOrderId(id);
+    setSelectionKey(k => k + 1);
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-50">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 bg-primary text-white shadow-md shrink-0">
+        <div>
+          <h1 className="font-semibold text-base leading-tight">{restaurantName}</h1>
+          <p className="text-blue-100 text-xs">Driver — {session.userId}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onLogout}
+          className="text-white hover:bg-blue-700 h-8 px-2 text-xs gap-1.5">
+          <LogOut className="w-3.5 h-3.5" />
+          Sign out
+        </Button>
+      </div>
+
+      {/* Body: order list + map */}
+      <div className="flex flex-1 min-h-0">
+        {/* Orders panel */}
+        <div className="w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-y-auto">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h2 className="text-sm font-semibold text-gray-800">My Deliveries</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{orders.length} order{orders.length !== 1 ? "s" : ""} assigned</p>
+          </div>
+          <div className="p-3 space-y-3 flex-1">
+            {isLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              </div>
+            ) : orders.length === 0 ? (
+              <div className="text-center py-10 text-gray-400">
+                <Truck className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No orders assigned</p>
+                <p className="text-xs mt-1">Your orders will appear here</p>
+              </div>
+            ) : (
+              orders.map(order => (
+                <DriverOrderCard
+                  key={order.id}
+                  order={order}
+                  restaurantSlug={restaurantSlug}
+                  onRefetch={refetch}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Map */}
+        <div className="flex-1 relative">
+          <MapContainer
+            orders={orders}
+            selectedOrderId={selectedOrderId}
+            selectionKey={selectionKey}
+            onOrderSelect={handleOrderSelect}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Staff View ────────────────────────────────────────────────────────────────
+
+function StaffView({
+  session,
+  restaurantName,
+  restaurantSlug,
+  onLogout,
+}: {
+  session: RestaurantSession;
+  restaurantName: string;
+  restaurantSlug: string;
+  onLogout: () => void;
+}) {
+  const [addOrderOpen, setAddOrderOpen] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [selectionKey, setSelectionKey] = useState(0);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const handleOrderSelect = (id: number | null) => {
+    setSelectedOrderId(id);
+    setSelectionKey(k => k + 1);
+  };
+
+  const { data: orders = [], refetch, isLoading } = useQuery<Order[]>({
+    queryKey: [`/api/${restaurantSlug}/orders`],
+    refetchInterval: 30000,
+  });
+
+  const { data: deliveredList = [] } = useQuery<any[]>({
+    queryKey: [`/api/${restaurantSlug}/orders/delivered/today`],
+    refetchInterval: 60000,
+  });
+
+  const { data: drivers = [] } = useQuery<ActiveDriver[]>({
+    queryKey: [`/api/${restaurantSlug}/active-drivers`],
+    refetchInterval: 60000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      {/* Mobile backdrop */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div className={`
+        fixed md:relative z-50 md:z-0
+        w-80 h-full transform transition-transform duration-300
+        ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+      `}>
+        <StaffSidebar
+          session={session}
+          restaurantName={restaurantName}
+          orders={orders}
+          drivers={drivers}
+          deliveredToday={deliveredList.length}
+          restaurantSlug={restaurantSlug}
+          selectedOrderId={selectedOrderId}
+          onOrderSelect={handleOrderSelect}
+          onAddOrder={() => setAddOrderOpen(true)}
+          onRefetch={refetch}
+          onLogout={onLogout}
+          isMobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
+        />
+      </div>
+
+      {/* Map area */}
+      <div className="flex-1 relative">
+        {/* Mobile menu toggle */}
+        <button
+          className="md:hidden fixed top-4 left-4 z-30 bg-primary text-white p-2 rounded-lg shadow-lg"
+          onClick={() => setMobileSidebarOpen(true)}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
+        <MapContainer
+          orders={orders}
+          selectedOrderId={selectedOrderId}
+          selectionKey={selectionKey}
+          onOrderSelect={handleOrderSelect}
+        />
+      </div>
+
+      {/* Map legend (status colours) already inside MapContainer */}
+
+      <AddOrderModal
+        open={addOrderOpen}
+        onClose={() => setAddOrderOpen(false)}
+        restaurantSlug={restaurantSlug}
+        onSuccess={() => { refetch(); setAddOrderOpen(false); }}
+      />
+    </div>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export default function RestaurantDashboard() {
+  const { restaurantSlug } = useParams<{ restaurantSlug: string }>();
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: session, isLoading: sessionLoading, error: sessionError } = useQuery<RestaurantSession>({
+    queryKey: [`/api/${restaurantSlug}/me`],
+    queryFn: async () => {
+      const res = await fetch(`/api/${restaurantSlug}/me`, { credentials: "include" });
+      if (res.status === 401) throw Object.assign(new Error("Unauthorized"), { status: 401 });
+      if (!res.ok) throw new Error("Server error");
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const { data: restaurantInfo } = useQuery<{ name: string; slug: string }>({
+    queryKey: [`/api/${restaurantSlug}/info`],
+    enabled: !!session,
+  });
+
+  // Redirect to login on 401
+  useEffect(() => {
+    if (sessionError && (sessionError as any).status === 401) {
+      navigate(`/${restaurantSlug}/login`);
+    }
+  }, [sessionError, restaurantSlug, navigate]);
+
+  const handleLogout = async () => {
+    try {
+      await apiRequest("POST", `/api/${restaurantSlug}/logout`, {});
+      queryClient.clear();
+      navigate(`/${restaurantSlug}/login`);
+    } catch {
+      toast({ title: "Error", description: "Logout failed.", variant: "destructive" });
+    }
+  };
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-7 h-7 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return null;
+  }
+
+  const restaurantName = restaurantInfo?.name ?? restaurantSlug ?? "Restaurant";
+
+  if (session.role === "driver") {
+    return (
+      <DriverView
+        session={session}
+        restaurantName={restaurantName}
+        restaurantSlug={restaurantSlug!}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  return (
+    <StaffView
+      session={session}
+      restaurantName={restaurantName}
+      restaurantSlug={restaurantSlug!}
+      onLogout={handleLogout}
+    />
+  );
+}

@@ -13,6 +13,8 @@ interface MapContainerProps {
   selectedOrderId: number | null;
   selectionKey: number;
   onOrderSelect: (id: number | null) => void;
+  defaultCenter?: [number, number];
+  defaultZoom?: number;
 }
 
 type MarkerMode = "normal" | "flashing";
@@ -66,10 +68,14 @@ const buildPopup = (order: Order, color: string) => `
   </div>`;
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export function MapContainer({ orders, selectedOrderId, selectionKey, onOrderSelect }: MapContainerProps) {
+export function MapContainer({ orders, selectedOrderId, selectionKey, onOrderSelect, defaultCenter, defaultZoom }: MapContainerProps) {
   const mapRef          = useRef<HTMLDivElement>(null);
   const mapInstanceRef  = useRef<any>(null);
   const markersRef      = useRef<Map<number, any>>(new Map());
+  const hasAutoFittedRef = useRef(false);
+
+  const centerRef = useRef<[number, number]>(defaultCenter ?? [51.4, 0.55]);
+  const zoomRef   = useRef<number>(defaultZoom ?? 12);
 
   // Mutable refs — always hold latest values without causing effect re-runs
   const ordersRef       = useRef<Order[]>(orders);
@@ -117,7 +123,7 @@ export function MapContainer({ orders, selectedOrderId, selectionKey, onOrderSel
       }
 
       if (mapInstanceRef.current) return;
-      mapInstanceRef.current = window.L.map(mapRef.current).setView([51.4, 0.55], 12);
+      mapInstanceRef.current = window.L.map(mapRef.current).setView(centerRef.current, zoomRef.current);
       window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap contributors",
       }).addTo(mapInstanceRef.current);
@@ -250,9 +256,34 @@ export function MapContainer({ orders, selectedOrderId, selectionKey, onOrderSel
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrderId, selectionKey]);
 
+  // ── Auto-fit once when the first batch of orders with coordinates loads ──────
+  useEffect(() => {
+    if (hasAutoFittedRef.current) return;
+    if (!mapInstanceRef.current) return;
+    const withCoords = orders.filter(o => o.latitude && o.longitude);
+    if (withCoords.length === 0) return;
+    hasAutoFittedRef.current = true;
+    const group = window.L?.featureGroup(
+      withCoords.map(o => window.L.marker([parseFloat(o.latitude!), parseFloat(o.longitude!)]))
+    );
+    if (group) {
+      mapInstanceRef.current.fitBounds(group.getBounds(), { padding: [50, 50], maxZoom: 14 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders]);
+
   // ── Map control handlers ──────────────────────────────────────────────────
-  const centerMap = () =>
-    mapInstanceRef.current?.flyTo([51.4, 0.55], 12, { animate: true, duration: 0.6 });
+  const centerMap = () => {
+    const withCoords = ordersRef.current.filter(o => o.latitude && o.longitude);
+    if (withCoords.length > 0 && window.L) {
+      const group = window.L.featureGroup(
+        withCoords.map(o => window.L.marker([parseFloat(o.latitude!), parseFloat(o.longitude!)]))
+      );
+      mapInstanceRef.current?.fitBounds(group.getBounds(), { padding: [50, 50], maxZoom: 14, animate: true });
+    } else {
+      mapInstanceRef.current?.flyTo(centerRef.current, zoomRef.current, { animate: true, duration: 0.6 });
+    }
+  };
 
   const refreshMap = () =>
     mapInstanceRef.current?.invalidateSize();

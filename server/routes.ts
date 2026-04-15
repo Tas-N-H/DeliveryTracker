@@ -16,7 +16,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Restaurant registration (open to anyone) ─────────────────────────────────
 
-  // POST /api/setup — create a new restaurant + owner account, then log them in
   app.post("/api/setup", async (req, res) => {
     try {
       const setupSchema = z.object({
@@ -41,7 +40,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         passwordHash,
       });
 
-      // Auto-login: create a restaurant session for the new owner
       req.session.restaurantSession = {
         userId: user.id,
         role: "owner",
@@ -59,7 +57,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: "owner",
       });
     } catch (error: any) {
-      // Unique constraint violation (slug or email already taken)
       if (error?.code === "23505") {
         const detail: string = error.detail ?? "";
         if (detail.includes("slug")) {
@@ -77,7 +74,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Restaurant auth (public) ─────────────────────────────────────────────────
 
-  // POST /api/:restaurantSlug/login
   app.post("/api/:restaurantSlug/login", async (req, res) => {
     const { restaurantSlug } = req.params;
     const { email, password } = req.body;
@@ -112,7 +108,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         req.session.save((err) => (err ? reject(err) : resolve()))
       );
 
-      // Mark driver as active for today when they log in
       if (membership.role === "driver") {
         await storage.upsertDriverSession(user.id, restaurant.id);
       }
@@ -129,7 +124,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET /api/:restaurantSlug/info — public: confirms the restaurant exists
   app.get("/api/:restaurantSlug/info", async (req, res) => {
     try {
       const restaurant = await storage.getRestaurantBySlug(req.params.restaurantSlug);
@@ -144,7 +138,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Restaurant auth (session required) ──────────────────────────────────────
 
-  // GET /api/:restaurantSlug/me
   app.get("/api/:restaurantSlug/me",
     requireRestaurantSession,
     (req, res) => {
@@ -152,13 +145,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // POST /api/:restaurantSlug/logout
   app.post("/api/:restaurantSlug/logout",
     requireRestaurantSession,
     async (req, res) => {
       const session = req.session.restaurantSession!;
 
-      // Mark driver as inactive when they log out
       if (session.role === "driver") {
         await storage.deactivateDriverSession(session.userId, session.restaurantId);
       }
@@ -168,45 +159,207 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // ── Permission-gated restaurant routes ───────────────────────────────────────
-  // All routes below require:
-  //   1. requireRestaurantSession  — valid session for this restaurant
-  //   2. requirePermission(action) — role allowed to perform this action
+  // ── Geocode (restaurant-scoped) ──────────────────────────────────────────────
 
-  // view_orders → owner, manager, employee
+  app.post("/api/:restaurantSlug/geocode",
+    requireRestaurantSession,
+    async (req, res) => {
+      try {
+        const { address } = req.body;
+        if (!address) {
+          return res.status(400).json({ error: "Address is required" });
+        }
+
+        const postcodeMatch = address.match(/([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][ABD-HJLNP-UW-Z]{2})/i);
+        if (postcodeMatch) {
+          const postcode = postcodeMatch[1].replace(/\s+/g, " ").trim();
+          const r = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+          const d = await r.json();
+          if (d.status === 200 && d.result) {
+            return res.json({
+              latitude: d.result.latitude.toString(),
+              longitude: d.result.longitude.toString(),
+            });
+          }
+        }
+
+        const r = await fetch(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(address)}`);
+        const d = await r.json();
+        if (d.status === 200 && d.result?.length > 0) {
+          return res.json({
+            latitude: d.result[0].latitude.toString(),
+            longitude: d.result[0].longitude.toString(),
+          });
+        }
+
+        res.json({ latitude: "51.5000", longitude: "-0.1200" });
+      } catch (error) {
+        console.error("Geocode error:", error);
+        res.json({ latitude: "51.5000", longitude: "-0.1200" });
+      }
+    }
+  );
+
+  // ── Restaurant orders ────────────────────────────────────────────────────────
+  // IMPORTANT: static sub-paths (delivered/today) must be registered BEFORE dynamic /:orderId paths
+
+  // GET /api/:restaurantSlug/orders/delivered/today
+  app.get("/api/:restaurantSlug/orders/delivered/today",
+    requireRestaurantSession,
+    requirePermission("view_orders"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const delivered = await storage.getTodaysDeliveredRestaurantOrders(restaurantId);
+        res.json(delivered);
+      } catch (error) {
+        console.error("Error fetching delivered orders:", error);
+        res.status(500).json({ message: "Failed to fetch delivered orders" });
+      }
+    }
+  );
+
+  // GET /api/:restaurantSlug/orders
   app.get("/api/:restaurantSlug/orders",
     requireRestaurantSession,
     requirePermission("view_orders"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "view_orders" });
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const orderList = await storage.getRestaurantOrders(restaurantId);
+        res.json(orderList);
+      } catch (error) {
+        console.error("Error fetching orders:", error);
+        res.status(500).json({ message: "Failed to fetch orders" });
+      }
     }
   );
 
-  // assign_order → owner, manager, employee
+  // POST /api/:restaurantSlug/orders
+  app.post("/api/:restaurantSlug/orders",
+    requireRestaurantSession,
+    requirePermission("manage_orders"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const parsed = insertOrderSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Invalid order data", errors: parsed.error.errors });
+        }
+        const order = await storage.createRestaurantOrder({
+          ...parsed.data,
+          restaurantId,
+        });
+        res.status(201).json(order);
+      } catch (error) {
+        console.error("Error creating order:", error);
+        res.status(500).json({ message: "Failed to create order" });
+      }
+    }
+  );
+
+  // PATCH /api/:restaurantSlug/orders/:orderId/status
+  app.patch("/api/:restaurantSlug/orders/:orderId/status",
+    requireRestaurantSession,
+    requirePermission("manage_orders"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const orderId = parseInt(req.params.orderId);
+        const { status } = req.body;
+
+        if (!status || !["cooking", "packed", "in-transit"].includes(status)) {
+          return res.status(400).json({ message: "Invalid status" });
+        }
+
+        const order = await storage.updateRestaurantOrderStatus(restaurantId, orderId, status);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+        res.json(order);
+      } catch (error) {
+        console.error("Error updating order status:", error);
+        res.status(500).json({ message: "Failed to update order status" });
+      }
+    }
+  );
+
+  // DELETE /api/:restaurantSlug/orders/:orderId  (staff marks delivered)
+  app.delete("/api/:restaurantSlug/orders/:orderId",
+    requireRestaurantSession,
+    requirePermission("manage_orders"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const orderId = parseInt(req.params.orderId);
+        const success = await storage.markRestaurantOrderDelivered(restaurantId, orderId);
+        if (!success) return res.status(404).json({ message: "Order not found" });
+        res.status(204).send();
+      } catch (error) {
+        console.error("Error marking order as delivered:", error);
+        res.status(500).json({ message: "Failed to mark order as delivered" });
+      }
+    }
+  );
+
+  // POST /api/:restaurantSlug/orders/:orderId/assign
   app.post("/api/:restaurantSlug/orders/:orderId/assign",
     requireRestaurantSession,
     requirePermission("assign_order"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "assign_order" });
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const orderId = parseInt(req.params.orderId);
+        const { driverId } = req.body;
+
+        const driverIdNum = driverId == null ? null : parseInt(driverId);
+        const order = await storage.assignOrderToDriver(restaurantId, orderId, driverIdNum);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+        res.json(order);
+      } catch (error) {
+        console.error("Error assigning driver:", error);
+        res.status(500).json({ message: "Failed to assign driver" });
+      }
     }
   );
 
-  // view_own_orders → driver only
+  // PATCH /api/:restaurantSlug/orders/:orderId/delivery-status  (driver marks delivered)
+  app.patch("/api/:restaurantSlug/orders/:orderId/delivery-status",
+    requireRestaurantSession,
+    requirePermission("update_delivery_status"),
+    async (req, res) => {
+      try {
+        const { restaurantId, userId } = req.session.restaurantSession!;
+        const orderId = parseInt(req.params.orderId);
+
+        // Verify order belongs to this restaurant and is assigned to this driver
+        const order = await storage.getRestaurantOrder(restaurantId, orderId);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+        if (order.assignedDriverId !== userId) {
+          return res.status(403).json({ message: "This order is not assigned to you" });
+        }
+
+        const success = await storage.markRestaurantOrderDelivered(restaurantId, orderId);
+        if (!success) return res.status(404).json({ message: "Order not found" });
+        res.json({ ok: true });
+      } catch (error) {
+        console.error("Error marking order as delivered:", error);
+        res.status(500).json({ message: "Failed to mark order as delivered" });
+      }
+    }
+  );
+
+  // GET /api/:restaurantSlug/driver/orders
   app.get("/api/:restaurantSlug/driver/orders",
     requireRestaurantSession,
     requirePermission("view_own_orders"),
     async (req, res) => {
-      const { userId } = req.session.restaurantSession!;
-      res.json({ ok: true, permission: "view_own_orders", driverId: userId });
-    }
-  );
-
-  // update_delivery_status → driver only
-  app.patch("/api/:restaurantSlug/orders/:orderId/delivery-status",
-    requireRestaurantSession,
-    requirePermission("update_delivery_status"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "update_delivery_status" });
+      try {
+        const { restaurantId, userId } = req.session.restaurantSession!;
+        const driverOrders = await storage.getDriverOrders(restaurantId, userId);
+        res.json(driverOrders);
+      } catch (error) {
+        console.error("Error fetching driver orders:", error);
+        res.status(500).json({ message: "Failed to fetch driver orders" });
+      }
     }
   );
 
