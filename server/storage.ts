@@ -52,6 +52,14 @@ export interface IStorage {
   markRestaurantOrderDelivered(restaurantId: number, orderId: number): Promise<boolean>;
   getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]>;
   getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
+
+  // Staff management
+  getRestaurantStaff(restaurantId: number): Promise<{ userId: number; email: string; role: string }[]>;
+  addStaffMember(restaurantId: number, params: { email: string; passwordHash: string; role: string }): Promise<{ userId: number; email: string; role: string }>;
+  removeStaffMember(restaurantId: number, userId: number): Promise<boolean>;
+
+  // Settings
+  updateRestaurantName(restaurantId: number, name: string): Promise<Restaurant>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -298,6 +306,59 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(orders.createdAt);
+  }
+
+  // ── Staff management ─────────────────────────────────────────────────────────
+
+  async getRestaurantStaff(restaurantId: number): Promise<{ userId: number; email: string; role: string }[]> {
+    return await db
+      .select({ userId: users.id, email: users.email, role: restaurantUsers.role })
+      .from(restaurantUsers)
+      .innerJoin(users, eq(restaurantUsers.userId, users.id))
+      .where(eq(restaurantUsers.restaurantId, restaurantId))
+      .orderBy(restaurantUsers.id);
+  }
+
+  async addStaffMember(
+    restaurantId: number,
+    { email, passwordHash, role }: { email: string; passwordHash: string; role: string }
+  ): Promise<{ userId: number; email: string; role: string }> {
+    return await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(users).where(eq(users.email, email));
+      if (existing) {
+        const [membership] = await tx
+          .select()
+          .from(restaurantUsers)
+          .where(and(eq(restaurantUsers.userId, existing.id), eq(restaurantUsers.restaurantId, restaurantId)));
+        if (membership) {
+          throw Object.assign(new Error("Already a staff member at this restaurant"), { code: "ALREADY_MEMBER" });
+        }
+        await tx.insert(restaurantUsers).values({ userId: existing.id, restaurantId, role: role as any });
+        return { userId: existing.id, email: existing.email, role };
+      }
+      const [newUser] = await tx.insert(users).values({ email, passwordHash }).returning();
+      await tx.insert(restaurantUsers).values({ userId: newUser.id, restaurantId, role: role as any });
+      return { userId: newUser.id, email: newUser.email, role };
+    });
+  }
+
+  async removeStaffMember(restaurantId: number, userId: number): Promise<boolean> {
+    const result = await db
+      .delete(restaurantUsers)
+      .where(and(eq(restaurantUsers.userId, userId), eq(restaurantUsers.restaurantId, restaurantId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  // ── Settings ─────────────────────────────────────────────────────────────────
+
+  async updateRestaurantName(restaurantId: number, name: string): Promise<Restaurant> {
+    const [restaurant] = await db
+      .update(restaurants)
+      .set({ name })
+      .where(eq(restaurants.id, restaurantId))
+      .returning();
+    return restaurant;
   }
 }
 

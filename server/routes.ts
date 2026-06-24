@@ -363,38 +363,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // manage_staff → owner, manager
+  // ── Staff management ─────────────────────────────────────────────────────────
+
+  // GET /api/:restaurantSlug/staff
+  app.get("/api/:restaurantSlug/staff",
+    requireRestaurantSession,
+    requirePermission("manage_staff"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const staff = await storage.getRestaurantStaff(restaurantId);
+        res.json(staff);
+      } catch (error) {
+        console.error("Error fetching staff:", error);
+        res.status(500).json({ message: "Failed to fetch staff" });
+      }
+    }
+  );
+
+  // POST /api/:restaurantSlug/staff
   app.post("/api/:restaurantSlug/staff",
     requireRestaurantSession,
     requirePermission("manage_staff"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "manage_staff" });
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const staffSchema = z.object({
+          email: z.string().email(),
+          password: z.string().min(8, "Password must be at least 8 characters"),
+          role: z.enum(["manager", "employee", "driver"]),
+        });
+        const parsed = staffSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+        }
+        const { email, password, role } = parsed.data;
+        const passwordHash = await bcrypt.hash(password, 10);
+        const member = await storage.addStaffMember(restaurantId, {
+          email: email.trim().toLowerCase(),
+          passwordHash,
+          role,
+        });
+        res.status(201).json(member);
+      } catch (error: any) {
+        if (error?.code === "ALREADY_MEMBER") {
+          return res.status(409).json({ message: "This person is already a staff member" });
+        }
+        console.error("Error adding staff member:", error);
+        res.status(500).json({ message: "Failed to add staff member" });
+      }
     }
   );
 
+  // DELETE /api/:restaurantSlug/staff/:userId
   app.delete("/api/:restaurantSlug/staff/:userId",
     requireRestaurantSession,
     requirePermission("manage_staff"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "manage_staff" });
+    async (req, res) => {
+      try {
+        const { restaurantId, userId: sessionUserId } = req.session.restaurantSession!;
+        const targetUserId = parseInt(req.params.userId);
+
+        // Prevent self-removal
+        if (targetUserId === sessionUserId) {
+          return res.status(400).json({ message: "You cannot remove yourself" });
+        }
+
+        // Prevent removing the owner
+        const staff = await storage.getRestaurantStaff(restaurantId);
+        const target = staff.find(s => s.userId === targetUserId);
+        if (!target) return res.status(404).json({ message: "Staff member not found" });
+        if (target.role === "owner") {
+          return res.status(403).json({ message: "The owner cannot be removed" });
+        }
+
+        await storage.removeStaffMember(restaurantId, targetUserId);
+        res.status(204).send();
+      } catch (error) {
+        console.error("Error removing staff member:", error);
+        res.status(500).json({ message: "Failed to remove staff member" });
+      }
     }
   );
 
-  // view_analytics → owner, manager
+  // ── Settings ──────────────────────────────────────────────────────────────────
+
+  // PATCH /api/:restaurantSlug/settings/name  (owner only)
+  app.patch("/api/:restaurantSlug/settings/name",
+    requireRestaurantSession,
+    requirePermission("manage_settings"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const schema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+        const parsed = schema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
+        }
+        const restaurant = await storage.updateRestaurantName(restaurantId, parsed.data.name);
+        res.json({ name: restaurant.name });
+      } catch (error) {
+        console.error("Error updating restaurant name:", error);
+        res.status(500).json({ message: "Failed to update name" });
+      }
+    }
+  );
+
+  // view_analytics → owner, manager (placeholder)
   app.get("/api/:restaurantSlug/analytics",
     requireRestaurantSession,
     requirePermission("view_analytics"),
     async (_req, res) => {
       res.json({ ok: true, permission: "view_analytics" });
-    }
-  );
-
-  // manage_settings → owner only
-  app.put("/api/:restaurantSlug/settings",
-    requireRestaurantSession,
-    requirePermission("manage_settings"),
-    async (_req, res) => {
-      res.json({ ok: true, permission: "manage_settings" });
     }
   );
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MapContainer } from "@/components/map-container";
@@ -46,6 +46,12 @@ import {
   BarChart3,
   UtensilsCrossed,
   Loader2,
+  Users,
+  Settings,
+  Trash2,
+  ShieldCheck,
+  UserCircle,
+  Save,
 } from "lucide-react";
 import { SiUbereats, SiJusteat } from "react-icons/si";
 import type { Order } from "@shared/schema";
@@ -365,7 +371,223 @@ function StaffOrderCard({
   );
 }
 
+// ── Manage Staff Tab ──────────────────────────────────────────────────────────
+
+interface StaffMember { userId: number; email: string; role: string }
+
+const ROLE_COLOURS: Record<string, string> = {
+  owner:    "bg-purple-100 text-purple-700",
+  manager:  "bg-blue-100 text-blue-700",
+  employee: "bg-gray-100 text-gray-600",
+  driver:   "bg-orange-100 text-orange-700",
+};
+
+const addStaffSchema = z.object({
+  email: z.string().email("Enter a valid email"),
+  password: z.string().min(8, "Minimum 8 characters"),
+  role: z.enum(["manager", "employee", "driver"], { required_error: "Select a role" }),
+});
+type AddStaffForm = z.infer<typeof addStaffSchema>;
+
+function ManageStaffTab({
+  restaurantSlug,
+  sessionUserId,
+}: {
+  restaurantSlug: string;
+  sessionUserId: number;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: staff = [], isLoading } = useQuery<StaffMember[]>({
+    queryKey: [`/api/${restaurantSlug}/staff`],
+    refetchInterval: 30000,
+  });
+
+  const form = useForm<AddStaffForm>({
+    resolver: zodResolver(addStaffSchema),
+    defaultValues: { email: "", password: "", role: undefined as any },
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (data: AddStaffForm) =>
+      apiRequest("POST", `/api/${restaurantSlug}/staff`, data).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "Staff member added" });
+      form.reset();
+      queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/staff`] });
+    },
+    onError: async (err: any) => {
+      const msg = err?.message?.includes("409") ? "This person is already a staff member"
+        : err?.message?.includes("400") ? "Check the form and try again"
+        : "Failed to add staff member";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (userId: number) =>
+      apiRequest("DELETE", `/api/${restaurantSlug}/staff/${userId}`),
+    onSuccess: () => {
+      toast({ title: "Staff member removed" });
+      queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/staff`] });
+    },
+    onError: () => toast({ title: "Error", description: "Failed to remove staff member", variant: "destructive" }),
+  });
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto px-4 py-3 space-y-5">
+      {/* Current staff list */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+          <Users className="w-4 h-4 text-gray-500" />
+          Current Staff
+        </h3>
+        {isLoading ? (
+          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+        ) : staff.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No staff yet</p>
+        ) : (
+          <ul className="space-y-2">
+            {staff.map(member => (
+              <li key={member.userId} className="flex items-center justify-between gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-800 truncate">{member.email}</p>
+                  <span className={`inline-block text-xs px-1.5 py-0 rounded font-medium mt-0.5 ${ROLE_COLOURS[member.role] ?? "bg-gray-100 text-gray-600"}`}>
+                    {member.role}
+                  </span>
+                </div>
+                {member.role !== "owner" && member.userId !== sessionUserId && (
+                  <button
+                    onClick={() => removeMutation.mutate(member.userId)}
+                    disabled={removeMutation.isPending}
+                    className="shrink-0 text-gray-400 hover:text-red-500 transition-colors p-1 rounded"
+                    title="Remove staff member"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Add staff form */}
+      <div className="border-t border-gray-100 pt-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-1.5">
+          <UserCircle className="w-4 h-4 text-gray-500" />
+          Add Staff Member
+        </h3>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(d => addMutation.mutate(d))} className="space-y-3">
+            <FormField control={form.control} name="email" render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Email</FormLabel>
+                <FormControl><Input type="email" placeholder="staff@example.com" className="h-8 text-sm" {...field} /></FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="password" render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Password</FormLabel>
+                <FormControl><Input type="password" placeholder="Min. 8 characters" className="h-8 text-sm" {...field} /></FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="role" render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Role</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select role" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="employee">Employee</SelectItem>
+                    <SelectItem value="driver">Driver</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )} />
+            <Button type="submit" className="w-full h-8 text-sm" disabled={addMutation.isPending}>
+              {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add Staff Member"}
+            </Button>
+          </form>
+        </Form>
+      </div>
+    </div>
+  );
+}
+
+// ── Settings Tab ──────────────────────────────────────────────────────────────
+
+function SettingsTab({
+  restaurantSlug,
+  currentName,
+  onNameSaved,
+}: {
+  restaurantSlug: string;
+  currentName: string;
+  onNameSaved: (name: string) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [nameValue, setNameValue] = useState(currentName);
+
+  const saveMutation = useMutation({
+    mutationFn: (name: string) =>
+      apiRequest("PATCH", `/api/${restaurantSlug}/settings/name`, { name }).then(r => r.json()),
+    onSuccess: (data) => {
+      toast({ title: "Name updated" });
+      queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/info`] });
+      onNameSaved(data.name);
+    },
+    onError: () => toast({ title: "Error", description: "Failed to save name", variant: "destructive" }),
+  });
+
+  // Keep local state in sync when currentName changes (e.g. after another save)
+  useState(() => { setNameValue(currentName); });
+
+  return (
+    <div className="px-4 py-4 space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-1.5">
+          <ShieldCheck className="w-4 h-4 text-gray-500" />
+          Restaurant Details
+        </h3>
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-gray-600">Restaurant Name</label>
+          <Input
+            value={nameValue}
+            onChange={e => setNameValue(e.target.value)}
+            className="h-9 text-sm"
+            placeholder="Restaurant name"
+          />
+          <Button
+            className="w-full h-8 text-sm"
+            disabled={saveMutation.isPending || nameValue.trim() === currentName || !nameValue.trim()}
+            onClick={() => saveMutation.mutate(nameValue.trim())}
+          >
+            {saveMutation.isPending
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <><Save className="w-3.5 h-3.5 mr-1.5" />Save Name</>
+            }
+          </Button>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-100 pt-4">
+        <p className="text-xs text-gray-400 italic">More settings coming soon — opening hours, contact details, and delivery zones.</p>
+      </div>
+    </div>
+  );
+}
+
 // ── Staff Sidebar ─────────────────────────────────────────────────────────────
+
+type SidebarTab = "orders" | "staff" | "settings";
 
 function StaffSidebar({
   session,
@@ -379,8 +601,8 @@ function StaffSidebar({
   onAddOrder,
   onRefetch,
   onLogout,
-  isMobileOpen,
   onCloseMobile,
+  onNameSaved,
 }: {
   session: RestaurantSession;
   restaurantName: string;
@@ -395,12 +617,24 @@ function StaffSidebar({
   onLogout: () => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
+  onNameSaved: (name: string) => void;
 }) {
-  const cooking   = orders.filter(o => o.status === "cooking").length;
-  const packed    = orders.filter(o => o.status === "packed").length;
-  const transit   = orders.filter(o => o.status === "in-transit").length;
+  const [activeTab, setActiveTab] = useState<SidebarTab>("orders");
+
+  const cooking = orders.filter(o => o.status === "cooking").length;
+  const packed  = orders.filter(o => o.status === "packed").length;
+  const transit = orders.filter(o => o.status === "in-transit").length;
 
   const roleLabel = session.role.charAt(0).toUpperCase() + session.role.slice(1);
+  const canManageStaff = session.role === "owner" || session.role === "manager";
+  const canManageSettings = session.role === "owner";
+
+  // Tab definitions
+  const tabs: { id: SidebarTab; label: string; icon: React.ReactNode }[] = [
+    { id: "orders",   label: "Orders",   icon: <UtensilsCrossed className="w-3.5 h-3.5" /> },
+    ...(canManageStaff    ? [{ id: "staff"    as SidebarTab, label: "Staff",    icon: <Users className="w-3.5 h-3.5" /> }] : []),
+    ...(canManageSettings ? [{ id: "settings" as SidebarTab, label: "Settings", icon: <Settings className="w-3.5 h-3.5" /> }] : []),
+  ];
 
   return (
     <div className="w-full h-full bg-white shadow-lg flex flex-col border-r border-gray-200">
@@ -426,69 +660,110 @@ function StaffSidebar({
         </div>
       </div>
 
-      {/* Add Order */}
-      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-        <Button onClick={onAddOrder} className="w-full bg-primary hover:bg-blue-700 text-white text-sm h-9">
-          <Plus className="w-4 h-4 mr-1.5" />
-          Add New Order
-        </Button>
-      </div>
-
-      {/* Order Summary */}
-      <div className="px-4 py-3 border-b border-gray-200">
-        <div className="flex items-center gap-2 mb-2.5">
-          <BarChart3 className="w-4 h-4 text-gray-500" />
-          <h2 className="text-sm font-semibold text-gray-800">Order Summary</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { icon: ChefHat, dotClass: "bg-red-500", label: "Cooking", count: cooking },
-            { icon: Package, dotClass: "bg-blue-500", label: "Packed", count: packed },
-            { icon: Truck, dotClass: "bg-orange-500", label: "In Transit", count: transit },
-            { icon: CheckCircle2, dotClass: "bg-green-500", label: "Delivered", count: deliveredToday },
-          ].map(({ dotClass, label, count }) => (
-            <div key={label} className="flex items-center justify-between bg-gray-50 rounded-md px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5">
-                <div className={`w-2 h-2 rounded-full ${dotClass}`} />
-                <span className="text-xs text-gray-600">{label}</span>
-              </div>
-              <span className="text-sm font-semibold text-gray-800">{count}</span>
-            </div>
+      {/* Tab bar — only shown when there's more than one tab */}
+      {tabs.length > 1 && (
+        <div className="flex border-b border-gray-200 bg-gray-50 shrink-0">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors border-b-2 ${
+                activeTab === tab.id
+                  ? "border-primary text-primary bg-white"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
           ))}
         </div>
-      </div>
+      )}
 
-      {/* Active Orders */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-1">Active Orders</h2>
-        {orders.length === 0 ? (
-          <div className="text-center py-10 text-gray-400">
-            <UtensilsCrossed className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No active orders</p>
-            <p className="text-xs mt-1">Add an order to get started</p>
+      {/* Tab content */}
+      {activeTab === "orders" && (
+        <>
+          {/* Add Order */}
+          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+            <Button onClick={onAddOrder} className="w-full bg-primary hover:bg-blue-700 text-white text-sm h-9">
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add New Order
+            </Button>
           </div>
-        ) : (
-          orders.map(order => (
-            <StaffOrderCard
-              key={order.id}
-              order={order}
-              drivers={drivers}
-              restaurantSlug={restaurantSlug}
-              isSelected={selectedOrderId === order.id}
-              onSelect={() => onOrderSelect(order.id)}
-              onRefetch={onRefetch}
-            />
-          ))
-        )}
-      </div>
 
-      {/* Scan Receipt */}
-      <div className="px-4 py-3 border-t border-gray-200">
-        <ReceiptScanner
-          onOrderCreated={onRefetch}
-          apiPath={`/api/${restaurantSlug}/orders`}
-        />
-      </div>
+          {/* Order Summary */}
+          <div className="px-4 py-3 border-b border-gray-200 shrink-0">
+            <div className="flex items-center gap-2 mb-2.5">
+              <BarChart3 className="w-4 h-4 text-gray-500" />
+              <h2 className="text-sm font-semibold text-gray-800">Order Summary</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { dotClass: "bg-red-500",    label: "Cooking",    count: cooking },
+                { dotClass: "bg-blue-500",   label: "Packed",     count: packed },
+                { dotClass: "bg-orange-500", label: "In Transit", count: transit },
+                { dotClass: "bg-green-500",  label: "Delivered",  count: deliveredToday },
+              ].map(({ dotClass, label, count }) => (
+                <div key={label} className="flex items-center justify-between bg-gray-50 rounded-md px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${dotClass}`} />
+                    <span className="text-xs text-gray-600">{label}</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-800">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Active Orders */}
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+            <h2 className="text-sm font-semibold text-gray-800 mb-1">Active Orders</h2>
+            {orders.length === 0 ? (
+              <div className="text-center py-10 text-gray-400">
+                <UtensilsCrossed className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No active orders</p>
+                <p className="text-xs mt-1">Add an order to get started</p>
+              </div>
+            ) : (
+              orders.map(order => (
+                <StaffOrderCard
+                  key={order.id}
+                  order={order}
+                  drivers={drivers}
+                  restaurantSlug={restaurantSlug}
+                  isSelected={selectedOrderId === order.id}
+                  onSelect={() => onOrderSelect(order.id)}
+                  onRefetch={onRefetch}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Scan Receipt */}
+          <div className="px-4 py-3 border-t border-gray-200 shrink-0">
+            <ReceiptScanner
+              onOrderCreated={onRefetch}
+              apiPath={`/api/${restaurantSlug}/orders`}
+            />
+          </div>
+        </>
+      )}
+
+      {activeTab === "staff" && canManageStaff && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ManageStaffTab restaurantSlug={restaurantSlug} sessionUserId={session.userId} />
+        </div>
+      )}
+
+      {activeTab === "settings" && canManageSettings && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <SettingsTab
+            restaurantSlug={restaurantSlug}
+            currentName={restaurantName}
+            onNameSaved={onNameSaved}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -658,7 +933,7 @@ function DriverView({
 
 function StaffView({
   session,
-  restaurantName,
+  restaurantName: initialRestaurantName,
   restaurantSlug,
   onLogout,
 }: {
@@ -671,6 +946,10 @@ function StaffView({
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [selectionKey, setSelectionKey] = useState(0);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [restaurantName, setRestaurantName] = useState(initialRestaurantName);
+
+  // Keep local name in sync if parent updates (e.g. on first fetch)
+  useEffect(() => { setRestaurantName(initialRestaurantName); }, [initialRestaurantName]);
 
   const handleOrderSelect = (id: number | null) => {
     setSelectedOrderId(id);
@@ -730,6 +1009,7 @@ function StaffView({
           onLogout={onLogout}
           isMobileOpen={mobileSidebarOpen}
           onCloseMobile={() => setMobileSidebarOpen(false)}
+          onNameSaved={name => setRestaurantName(name)}
         />
       </div>
 
