@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Camera, Upload, Loader2, CheckCircle, AlertCircle, X, ZoomIn } from "lucide-react";
+import { Camera, Upload, Loader2, CheckCircle, AlertCircle, X, ZoomIn, Crop } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { preprocessReceiptImage } from "@/lib/receipt-preprocess";
 import Tesseract from "tesseract.js";
 
 interface ReceiptScannerProps {
@@ -22,6 +23,8 @@ interface ExtractedOrderData {
   platform: string;
 }
 
+type ProcessingStage = "preprocessing" | "ocr" | null;
+
 // ── Device detection ──────────────────────────────────────────────────────────
 
 const isTouchDevice = () =>
@@ -29,76 +32,84 @@ const isTouchDevice = () =>
   (navigator.maxTouchPoints > 0 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 
 const hasGetUserMedia = () =>
-  typeof navigator !== "undefined" &&
-  !!navigator.mediaDevices?.getUserMedia;
+  typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: ReceiptScannerProps) {
   const [isOpen, setIsOpen]               = useState(false);
-  const [isProcessing, setIsProcessing]   = useState(false);
+  const [stage, setStage]                 = useState<ProcessingStage>(null);
   const [extractedData, setExtractedData] = useState<ExtractedOrderData | null>(null);
   const [ocrText, setOcrText]             = useState("");
+  const [previewUrl, setPreviewUrl]       = useState<string | null>(null);  // processed image
+  const [cropApplied, setCropApplied]     = useState(false);
 
   // Webcam state (desktop)
-  const [webcamActive, setWebcamActive]   = useState(false);
-  const [webcamError, setWebcamError]     = useState<string | null>(null);
-  const [capturing, setCapturing]         = useState(false);
+  const [webcamActive, setWebcamActive] = useState(false);
+  const [webcamError, setWebcamError]   = useState<string | null>(null);
+  const [capturing, setCapturing]       = useState(false);
 
-  const fileInputRef   = useRef<HTMLInputElement>(null);  // gallery / file upload
-  const cameraInputRef = useRef<HTMLInputElement>(null);  // mobile camera (capture attr)
+  const fileInputRef   = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const videoRef       = useRef<HTMLVideoElement>(null);
   const canvasRef      = useRef<HTMLCanvasElement>(null);
   const streamRef      = useRef<MediaStream | null>(null);
+  const previewUrlRef  = useRef<string | null>(null);  // for cleanup
 
   const { toast } = useToast();
   const geocodePath = apiPath.replace(/\/orders$/, "/geocode");
 
-  // Stop webcam stream whenever we close or leave webcam mode
+  // ── Cleanup ───────────────────────────────────────────────────────────────
+
   const stopStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
     setWebcamActive(false);
     setWebcamError(null);
   }, []);
 
-  // Stop stream when dialog closes
-  useEffect(() => {
-    if (!isOpen) {
-      stopStream();
-      setExtractedData(null);
-      setOcrText("");
+  const revokePreview = useCallback(() => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
     }
-  }, [isOpen, stopStream]);
+    setPreviewUrl(null);
+  }, []);
 
-  // ── Webcam helpers ───────────────────────────────────────────────────────────
+  const resetState = useCallback(() => {
+    stopStream();
+    revokePreview();
+    setExtractedData(null);
+    setOcrText("");
+    setStage(null);
+    setCropApplied(false);
+  }, [stopStream, revokePreview]);
+
+  useEffect(() => {
+    if (!isOpen) resetState();
+  }, [isOpen, resetState]);
+
+  // ── Webcam ────────────────────────────────────────────────────────────────
 
   const startWebcam = async () => {
     setWebcamError(null);
     try {
-      const constraints: MediaStreamConstraints = {
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      });
       streamRef.current = stream;
       setWebcamActive(true);
-      // Attach stream to video element after it mounts
       setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
+        if (videoRef.current) videoRef.current.srcObject = stream;
       }, 50);
     } catch (err: any) {
       const msg =
-        err?.name === "NotAllowedError"  ? "Camera access was denied. Please allow camera permission in your browser." :
+        err?.name === "NotAllowedError"  ? "Camera access denied — allow camera permission in your browser settings." :
         err?.name === "NotFoundError"    ? "No camera found on this device." :
-        err?.name === "NotReadableError" ? "Camera is already in use by another app." :
+        err?.name === "NotReadableError" ? "Camera is in use by another application." :
         "Could not start camera.";
       setWebcamError(msg);
-      setWebcamActive(false);
     }
   };
 
@@ -121,16 +132,16 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
     }, "image/jpeg", 0.92);
   };
 
-  // ── OCR pipeline ─────────────────────────────────────────────────────────────
+  // ── OCR pipeline ──────────────────────────────────────────────────────────
 
   const extractOrderInfo = (text: string): ExtractedOrderData | null => {
-    const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    const lines     = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    const textLower = text.toLowerCase();
     let orderNumber = "", address = "", platform = "";
 
-    const textLower = text.toLowerCase();
-    if (textLower.includes("uber eats") || textLower.includes("ubereats")) platform = "uber-eats";
-    else if (textLower.includes("just eat") || textLower.includes("justeat")) platform = "just-eat";
-    else if (textLower.includes("website") || textLower.includes("online order")) platform = "website";
+    if      (textLower.includes("uber eats") || textLower.includes("ubereats")) platform = "uber-eats";
+    else if (textLower.includes("just eat")  || textLower.includes("justeat"))  platform = "just-eat";
+    else if (textLower.includes("website")   || textLower.includes("online order")) platform = "website";
     else platform = "phone";
 
     for (const line of lines) {
@@ -138,7 +149,7 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
       if (m) { orderNumber = m[1]; break; }
     }
 
-    const ukPostcodeRegex = /([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][A-Z]{2})/i;
+    const ukPostcode = /([A-Z]{1,2}[0-9R][0-9A-Z]?\s*[0-9][A-Z]{2})/i;
     let addressLines: string[] = [];
     let foundPostcode = false;
 
@@ -150,11 +161,11 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
           if (al.toLowerCase().includes("phone") || al.toLowerCase().includes("email") ||
               al.toLowerCase().includes("total") || al.includes("£")) continue;
           addressLines.push(al);
-          if (ukPostcodeRegex.test(al)) { foundPostcode = true; break; }
+          if (ukPostcode.test(al)) { foundPostcode = true; break; }
         }
         if (foundPostcode) break;
       }
-      if (ukPostcodeRegex.test(line) && !foundPostcode) {
+      if (ukPostcode.test(line) && !foundPostcode) {
         for (let k = Math.max(0, i - 3); k <= i; k++) {
           if (!addressLines.includes(lines[k])) addressLines.push(lines[k]);
         }
@@ -169,35 +180,51 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
   };
 
   const processImage = async (file: File) => {
-    setIsProcessing(true);
-    setOcrText("");
+    revokePreview();
     setExtractedData(null);
+    setOcrText("");
+
+    // ── Step 1: preprocess ─────────────────────────────────────────────────
+    setStage("preprocessing");
+    let tesseractInput: Blob = file;
     try {
-      const result = await Tesseract.recognize(file, "eng");
-      const text = result.data.text;
+      const result = await preprocessReceiptImage(file);
+      tesseractInput  = result.blob;
+      previewUrlRef.current = result.previewUrl;
+      setPreviewUrl(result.previewUrl);
+      setCropApplied(result.cropApplied);
+    } catch (e) {
+      // Preprocessing failed — fall back to original file, still run OCR
+      console.warn("Preprocessing failed, using original image:", e);
+    }
+
+    // ── Step 2: OCR ────────────────────────────────────────────────────────
+    setStage("ocr");
+    try {
+      const result  = await Tesseract.recognize(tesseractInput, "eng");
+      const text    = result.data.text;
       setOcrText(text);
       const extracted = extractOrderInfo(text);
       if (extracted) {
         setExtractedData(extracted);
-        toast({ title: "Receipt Processed", description: "Review and confirm the details below." });
+        toast({ title: "Receipt Processed", description: "Review the extracted details below." });
       } else {
-        toast({ title: "Extraction Limited", description: "Could not extract all details — please fill them in.", variant: "destructive" });
+        toast({ title: "Extraction Limited", description: "Could not read all details — fill in the missing fields.", variant: "destructive" });
       }
     } catch {
-      toast({ title: "Processing Failed", description: "Failed to read the receipt image.", variant: "destructive" });
+      toast({ title: "OCR Failed", description: "Failed to read the receipt image.", variant: "destructive" });
     } finally {
-      setIsProcessing(false);
+      setStage(null);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) processImage(file);
-    // Reset so selecting the same file again still fires onChange
     e.target.value = "";
   };
 
-  // ── Create order ─────────────────────────────────────────────────────────────
+  // ── Create order ──────────────────────────────────────────────────────────
 
   const createOrderMutation = useMutation({
     mutationFn: async (orderData: any) => apiRequest("POST", apiPath, orderData),
@@ -228,14 +255,16 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
     }
   };
 
-  const updateField = (field: keyof ExtractedOrderData, value: string) => {
-    if (extractedData) setExtractedData({ ...extractedData, [field]: value });
-  };
+  const updateField = (field: keyof ExtractedOrderData, value: string) =>
+    setExtractedData(prev => prev ? { ...prev, [field]: value } : null);
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Layout helpers ────────────────────────────────────────────────────────
 
   const mobile        = isTouchDevice();
   const desktopWebcam = !mobile && hasGetUserMedia();
+  const isProcessing  = stage !== null;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open) stopStream(); setIsOpen(open); }}>
@@ -253,29 +282,19 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
 
         <div className="space-y-4">
 
-          {/* ── Capture options ── */}
+          {/* ── Capture buttons ── */}
           {!webcamActive && !isProcessing && (
             <div className="space-y-2">
               <Label className="text-sm font-medium text-gray-700">Capture method</Label>
               <div className="grid grid-cols-2 gap-2">
-
-                {/* Take Photo — mobile uses native camera, desktop opens webcam */}
                 <Button
                   variant="outline"
                   className="flex flex-col gap-1.5 h-16 text-xs"
-                  onClick={() => {
-                    if (mobile) {
-                      cameraInputRef.current?.click();
-                    } else if (desktopWebcam) {
-                      startWebcam();
-                    }
-                  }}
+                  onClick={() => mobile ? cameraInputRef.current?.click() : startWebcam()}
                 >
                   <Camera className="w-5 h-5 text-blue-500" />
                   {mobile ? "Take Photo" : "Use Webcam"}
                 </Button>
-
-                {/* Upload / gallery */}
                 <Button
                   variant="outline"
                   className="flex flex-col gap-1.5 h-16 text-xs"
@@ -285,52 +304,22 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
                   {mobile ? "Choose Gallery" : "Upload File"}
                 </Button>
               </div>
-
-              {/* Mobile: extra "Upload File" row if we want all three options clearly */}
-              {/* (gallery and upload are same on mobile — both use file input without capture) */}
-
-              {/* Webcam not available on this desktop */}
               {!mobile && !desktopWebcam && (
-                <p className="text-xs text-gray-400 italic mt-1">
-                  Webcam not available — upload a photo instead.
-                </p>
+                <p className="text-xs text-gray-400 italic">Webcam not available — upload a photo instead.</p>
               )}
             </div>
           )}
 
-          {/* Hidden file inputs */}
-          {/* Mobile: camera capture */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          {/* Gallery / file upload (all devices) */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          {/* Hidden canvas for webcam frame capture */}
+          {/* Hidden inputs */}
+          <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileSelect} />
+          <input ref={fileInputRef}   type="file" accept="image/*"                        className="hidden" onChange={handleFileSelect} />
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* ── Desktop webcam preview ── */}
+          {/* ── Webcam preview ── */}
           {webcamActive && (
             <div className="space-y-3">
               <div className="relative rounded-lg overflow-hidden bg-black aspect-video">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-                {/* Cancel */}
+                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                 <button
                   onClick={stopStream}
                   className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1.5 transition-colors"
@@ -340,41 +329,62 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
               </div>
               {webcamError && (
                 <div className="flex items-start gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  {webcamError}
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{webcamError}
                 </div>
               )}
               <div className="flex gap-2">
-                <Button variant="outline" className="flex-1 h-9 text-sm" onClick={stopStream}>
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700"
-                  onClick={captureFrame}
-                  disabled={capturing}
-                >
-                  {capturing
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <><ZoomIn className="w-4 h-4 mr-1.5" />Capture</>
-                  }
+                <Button variant="outline" className="flex-1 h-9 text-sm" onClick={stopStream}>Cancel</Button>
+                <Button className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700" onClick={captureFrame} disabled={capturing}>
+                  {capturing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ZoomIn className="w-4 h-4 mr-1.5" />Capture</>}
                 </Button>
               </div>
             </div>
           )}
 
-          {/* Webcam error (shown outside preview too, if camera never opened) */}
           {webcamError && !webcamActive && (
             <div className="flex items-start gap-2 p-3 bg-red-50 rounded-lg text-sm text-red-700">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              {webcamError}
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{webcamError}
             </div>
           )}
 
           {/* ── Processing indicator ── */}
           {isProcessing && (
-            <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-              <span className="text-sm text-blue-800">Reading receipt…</span>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                <span className="text-sm text-blue-800">
+                  {stage === "preprocessing" ? "Enhancing image…" : "Reading receipt text…"}
+                </span>
+              </div>
+              {/* Show processed image preview as soon as it's ready */}
+              {previewUrl && stage === "ocr" && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <Crop className="w-3.5 h-3.5" />
+                    {cropApplied ? "Receipt detected and cropped" : "Full image — no crop needed"}
+                  </div>
+                  <img
+                    src={previewUrl}
+                    alt="Preprocessed receipt"
+                    className="w-full rounded border border-gray-200 max-h-48 object-contain bg-gray-50"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Processed image preview (after OCR completes, until form is submitted) */}
+          {!isProcessing && previewUrl && !extractedData && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                <Crop className="w-3.5 h-3.5" />
+                {cropApplied ? "Receipt detected and cropped" : "Contrast enhanced"}
+              </div>
+              <img
+                src={previewUrl}
+                alt="Preprocessed receipt"
+                className="w-full rounded border border-gray-200 max-h-48 object-contain bg-gray-50"
+              />
             </div>
           )}
 
@@ -385,24 +395,14 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
                 <CheckCircle className="w-4 h-4 text-green-600" />
                 <span className="text-sm text-green-800">Order info extracted — review and confirm</span>
               </div>
-
               <div className="space-y-3">
                 <div>
                   <Label htmlFor="orderNumber">Order Number</Label>
-                  <Input
-                    id="orderNumber"
-                    value={extractedData.orderNumber}
-                    onChange={e => updateField("orderNumber", e.target.value)}
-                  />
+                  <Input id="orderNumber" value={extractedData.orderNumber} onChange={e => updateField("orderNumber", e.target.value)} />
                 </div>
                 <div>
                   <Label htmlFor="address">Delivery Address</Label>
-                  <Textarea
-                    id="address"
-                    value={extractedData.address}
-                    onChange={e => updateField("address", e.target.value)}
-                    rows={3}
-                  />
+                  <Textarea id="address" value={extractedData.address} onChange={e => updateField("address", e.target.value)} rows={3} />
                 </div>
                 <div>
                   <Label htmlFor="platform">Platform</Label>
@@ -418,7 +418,6 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
                   </Select>
                 </div>
               </div>
-
               <Button onClick={handleCreateOrder} className="w-full" disabled={createOrderMutation.isPending}>
                 {createOrderMutation.isPending
                   ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating Order…</>
@@ -428,14 +427,14 @@ export function ReceiptScanner({ onOrderCreated, apiPath = "/api/orders" }: Rece
             </div>
           )}
 
-          {/* ── OCR text fallback (no data extracted) ── */}
+          {/* ── OCR text fallback ── */}
           {ocrText && !extractedData && !isProcessing && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 p-3 bg-yellow-50 rounded-lg">
                 <AlertCircle className="w-4 h-4 text-yellow-600" />
-                <span className="text-sm text-yellow-800">Manual review required</span>
+                <span className="text-sm text-yellow-800">Manual review required — details not found</span>
               </div>
-              <Label>Extracted Text</Label>
+              <Label>Raw OCR Text</Label>
               <Textarea value={ocrText} readOnly rows={6} className="text-xs font-mono" />
             </div>
           )}
