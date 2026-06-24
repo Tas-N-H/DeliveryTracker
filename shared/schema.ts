@@ -45,6 +45,7 @@ export const restaurants = pgTable("restaurants", {
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   authProviderId: varchar("auth_provider_id"),
+  name: text("name"),
   email: varchar("email").unique().notNull(),
   passwordHash: varchar("password_hash").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

@@ -403,19 +403,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requirePermission("manage_staff"),
     async (req, res) => {
       try {
-        const { restaurantId } = req.session.restaurantSession!;
+        const { restaurantId, role: requesterRole } = req.session.restaurantSession!;
         const staffSchema = z.object({
-          email: z.string().email(),
+          name:     z.string().min(1, "Name is required").max(100),
+          email:    z.string().email(),
           password: z.string().min(8, "Password must be at least 8 characters"),
-          role: z.enum(["manager", "employee", "driver"]),
+          role:     z.enum(["manager", "employee", "driver"]),
         });
         const parsed = staffSchema.safeParse(req.body);
         if (!parsed.success) {
           return res.status(400).json({ message: "Invalid input", errors: parsed.error.errors });
         }
-        const { email, password, role } = parsed.data;
+        const { name, email, password, role } = parsed.data;
+
+        // Managers cannot create manager-level accounts
+        if (requesterRole === "manager" && role === "manager") {
+          return res.status(403).json({ message: "Managers cannot create manager accounts" });
+        }
+
         const passwordHash = await bcrypt.hash(password, 10);
         const member = await storage.addStaffMember(restaurantId, {
+          name: name.trim(),
           email: email.trim().toLowerCase(),
           passwordHash,
           role,
@@ -427,6 +435,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         console.error("Error adding staff member:", error);
         res.status(500).json({ message: "Failed to add staff member" });
+      }
+    }
+  );
+
+  // PATCH /api/:restaurantSlug/staff/:userId/role
+  app.patch("/api/:restaurantSlug/staff/:userId/role",
+    requireRestaurantSession,
+    requirePermission("manage_staff"),
+    async (req, res) => {
+      try {
+        const { restaurantId, userId: sessionUserId, role: requesterRole } = req.session.restaurantSession!;
+        const targetUserId = parseInt(req.params.userId);
+        const roleSchema = z.object({ role: z.enum(["manager", "employee", "driver"]) });
+        const parsed = roleSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Invalid role" });
+        }
+        const { role: newRole } = parsed.data;
+
+        // Fetch current role of target
+        const staff = await storage.getRestaurantStaff(restaurantId);
+        const target = staff.find(s => s.userId === targetUserId);
+        if (!target) return res.status(404).json({ message: "Staff member not found" });
+
+        // Owners cannot be demoted
+        if (target.role === "owner") {
+          return res.status(403).json({ message: "The owner's role cannot be changed" });
+        }
+        // Nobody can change their own role
+        if (targetUserId === sessionUserId) {
+          return res.status(403).json({ message: "You cannot change your own role" });
+        }
+        // Managers: can only change employee ↔ driver (not to/from manager)
+        if (requesterRole === "manager") {
+          if (target.role === "manager") {
+            return res.status(403).json({ message: "Managers cannot change another manager's role" });
+          }
+          if (newRole === "manager") {
+            return res.status(403).json({ message: "Managers cannot promote to manager" });
+          }
+        }
+
+        const success = await storage.updateStaffRole(restaurantId, targetUserId, newRole);
+        if (!success) return res.status(404).json({ message: "Staff member not found" });
+        res.json({ userId: targetUserId, role: newRole });
+      } catch (error) {
+        console.error("Error updating staff role:", error);
+        res.status(500).json({ message: "Failed to update role" });
       }
     }
   );

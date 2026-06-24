@@ -55,9 +55,10 @@ export interface IStorage {
   getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
 
   // Staff management
-  getRestaurantStaff(restaurantId: number): Promise<{ userId: number; email: string; role: string }[]>;
-  addStaffMember(restaurantId: number, params: { email: string; passwordHash: string; role: string }): Promise<{ userId: number; email: string; role: string }>;
+  getRestaurantStaff(restaurantId: number): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }[]>;
+  addStaffMember(restaurantId: number, params: { name: string; email: string; passwordHash: string; role: string }): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }>;
   removeStaffMember(restaurantId: number, userId: number): Promise<boolean>;
+  updateStaffRole(restaurantId: number, userId: number, role: string): Promise<boolean>;
 
   // Settings
   updateRestaurantName(restaurantId: number, name: string): Promise<Restaurant>;
@@ -336,9 +337,17 @@ export class DatabaseStorage implements IStorage {
 
   // ── Staff management ─────────────────────────────────────────────────────────
 
-  async getRestaurantStaff(restaurantId: number): Promise<{ userId: number; email: string; role: string }[]> {
+  async getRestaurantStaff(
+    restaurantId: number,
+  ): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }[]> {
     return await db
-      .select({ userId: users.id, email: users.email, role: restaurantUsers.role })
+      .select({
+        userId:    users.id,
+        name:      users.name,
+        email:     users.email,
+        role:      restaurantUsers.role,
+        createdAt: users.createdAt,
+      })
       .from(restaurantUsers)
       .innerJoin(users, eq(restaurantUsers.userId, users.id))
       .where(eq(restaurantUsers.restaurantId, restaurantId))
@@ -347,8 +356,8 @@ export class DatabaseStorage implements IStorage {
 
   async addStaffMember(
     restaurantId: number,
-    { email, passwordHash, role }: { email: string; passwordHash: string; role: string }
-  ): Promise<{ userId: number; email: string; role: string }> {
+    { name, email, passwordHash, role }: { name: string; email: string; passwordHash: string; role: string },
+  ): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }> {
     return await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(users).where(eq(users.email, email));
       if (existing) {
@@ -360,17 +369,26 @@ export class DatabaseStorage implements IStorage {
           throw Object.assign(new Error("Already a staff member at this restaurant"), { code: "ALREADY_MEMBER" });
         }
         await tx.insert(restaurantUsers).values({ userId: existing.id, restaurantId, role: role as any });
-        return { userId: existing.id, email: existing.email, role };
+        return { userId: existing.id, name: existing.name, email: existing.email, role, createdAt: existing.createdAt };
       }
-      const [newUser] = await tx.insert(users).values({ email, passwordHash }).returning();
+      const [newUser] = await tx.insert(users).values({ name, email, passwordHash }).returning();
       await tx.insert(restaurantUsers).values({ userId: newUser.id, restaurantId, role: role as any });
-      return { userId: newUser.id, email: newUser.email, role };
+      return { userId: newUser.id, name: newUser.name, email: newUser.email, role, createdAt: newUser.createdAt };
     });
   }
 
   async removeStaffMember(restaurantId: number, userId: number): Promise<boolean> {
     const result = await db
       .delete(restaurantUsers)
+      .where(and(eq(restaurantUsers.userId, userId), eq(restaurantUsers.restaurantId, restaurantId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  async updateStaffRole(restaurantId: number, userId: number, role: string): Promise<boolean> {
+    const result = await db
+      .update(restaurantUsers)
+      .set({ role: role as any })
       .where(and(eq(restaurantUsers.userId, userId), eq(restaurantUsers.restaurantId, restaurantId)))
       .returning();
     return result.length > 0;

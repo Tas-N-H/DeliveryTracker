@@ -377,7 +377,13 @@ function StaffOrderCard({
 
 // ── Manage Staff Tab ──────────────────────────────────────────────────────────
 
-interface StaffMember { userId: number; email: string; role: string }
+interface StaffMember {
+  userId: number;
+  name: string | null;
+  email: string;
+  role: string;
+  createdAt: string;
+}
 
 const ROLE_COLOURS: Record<string, string> = {
   owner:    "bg-purple-100 text-purple-700",
@@ -386,22 +392,119 @@ const ROLE_COLOURS: Record<string, string> = {
   driver:   "bg-orange-100 text-orange-700",
 };
 
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner", manager: "Manager", employee: "Employee", driver: "Driver",
+};
+
+function formatMemberDate(ts: string) {
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 const addStaffSchema = z.object({
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(8, "Minimum 8 characters"),
-  role: z.enum(["manager", "employee", "driver"], { required_error: "Select a role" }),
+  name:            z.string().min(1, "Name is required").max(100),
+  email:           z.string().email("Enter a valid email"),
+  password:        z.string().min(8, "Minimum 8 characters"),
+  confirmPassword: z.string(),
+  role:            z.enum(["manager", "employee", "driver"], { required_error: "Select a role" }),
+}).refine(d => d.password === d.confirmPassword, {
+  message: "Passwords do not match",
+  path:    ["confirmPassword"],
 });
 type AddStaffForm = z.infer<typeof addStaffSchema>;
+
+// Per-row role editor component
+function RoleEditor({
+  member,
+  sessionRole,
+  sessionUserId,
+  restaurantSlug,
+}: {
+  member: StaffMember;
+  sessionRole: string;
+  sessionUserId: number;
+  restaurantSlug: string;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [pendingRole, setPendingRole] = useState(member.role);
+  const changed = pendingRole !== member.role;
+
+  const roleMutation = useMutation({
+    mutationFn: (role: string) =>
+      apiRequest("PATCH", `/api/${restaurantSlug}/staff/${member.userId}/role`, { role }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "Role updated" });
+      queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/staff`] });
+    },
+    onError: async (err: any) => {
+      setPendingRole(member.role);
+      const body = err?.response ? await err.response.json().catch(() => ({})) : {};
+      toast({ title: "Error", description: body.message ?? "Failed to update role", variant: "destructive" });
+    },
+  });
+
+  // Determine which roles this editor can show
+  const isOwner       = member.role === "owner";
+  const isSelf        = member.userId === sessionUserId;
+  const isTargetMgr   = member.role === "manager";
+
+  // Owner can change non-owner, non-self; manager can change employee↔driver only
+  const canEdit =
+    !isOwner &&
+    !isSelf &&
+    (sessionRole === "owner" || (sessionRole === "manager" && !isTargetMgr));
+
+  if (!canEdit) {
+    return (
+      <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOURS[member.role] ?? "bg-gray-100 text-gray-600"}`}>
+        {ROLE_LABELS[member.role] ?? member.role}
+      </span>
+    );
+  }
+
+  const roleOptions =
+    sessionRole === "owner"
+      ? ["manager", "employee", "driver"]
+      : ["employee", "driver"];
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <Select value={pendingRole} onValueChange={setPendingRole}>
+        <SelectTrigger className="h-6 text-xs w-28 px-2">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {roleOptions.map(r => (
+            <SelectItem key={r} value={r} className="text-xs">{ROLE_LABELS[r]}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {changed && (
+        <Button
+          size="sm"
+          className="h-6 px-2 text-xs"
+          disabled={roleMutation.isPending}
+          onClick={() => roleMutation.mutate(pendingRole)}
+        >
+          {roleMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function ManageStaffTab({
   restaurantSlug,
   sessionUserId,
+  sessionRole,
 }: {
   restaurantSlug: string;
   sessionUserId: number;
+  sessionRole: string;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
 
   const { data: staff = [], isLoading } = useQuery<StaffMember[]>({
     queryKey: [`/api/${restaurantSlug}/staff`],
@@ -410,21 +513,21 @@ function ManageStaffTab({
 
   const form = useForm<AddStaffForm>({
     resolver: zodResolver(addStaffSchema),
-    defaultValues: { email: "", password: "", role: undefined as any },
+    defaultValues: { name: "", email: "", password: "", confirmPassword: "", role: undefined as any },
   });
 
   const addMutation = useMutation({
-    mutationFn: (data: AddStaffForm) =>
+    mutationFn: ({ confirmPassword: _cp, ...data }: AddStaffForm) =>
       apiRequest("POST", `/api/${restaurantSlug}/staff`, data).then(r => r.json()),
     onSuccess: () => {
       toast({ title: "Staff member added" });
       form.reset();
+      setShowForm(false);
       queryClient.invalidateQueries({ queryKey: [`/api/${restaurantSlug}/staff`] });
     },
     onError: async (err: any) => {
-      const msg = err?.message?.includes("409") ? "This person is already a staff member"
-        : err?.message?.includes("400") ? "Check the form and try again"
-        : "Failed to add staff member";
+      const body = err?.response ? await err.response.json().catch(() => ({})) : {};
+      const msg = body.message ?? "Failed to add staff member";
       toast({ title: "Error", description: msg, variant: "destructive" });
     },
   });
@@ -439,88 +542,140 @@ function ManageStaffTab({
     onError: () => toast({ title: "Error", description: "Failed to remove staff member", variant: "destructive" }),
   });
 
+  // Role options available to the current session user when adding
+  const addableRoles: Array<"manager" | "employee" | "driver"> =
+    sessionRole === "owner" ? ["manager", "employee", "driver"] : ["employee", "driver"];
+
+  // Whether current user can remove a given member
+  const canRemove = (member: StaffMember) =>
+    member.role !== "owner" &&
+    member.userId !== sessionUserId &&
+    (sessionRole === "owner" || (sessionRole === "manager" && member.role !== "manager"));
+
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 py-3 space-y-5">
-      {/* Current staff list */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* ── Staff list ─────────────────────────────────────────────────── */}
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
           <Users className="w-4 h-4 text-gray-500" />
-          Current Staff
+          Staff ({staff.length})
         </h3>
-        {isLoading ? (
-          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
-        ) : staff.length === 0 ? (
-          <p className="text-xs text-gray-400 italic">No staff yet</p>
-        ) : (
-          <ul className="space-y-2">
-            {staff.map(member => (
-              <li key={member.userId} className="flex items-center justify-between gap-2 bg-gray-50 rounded-lg px-3 py-2">
+        <Button size="sm" className="h-7 text-xs gap-1" onClick={() => setShowForm(v => !v)}>
+          <Plus className="w-3.5 h-3.5" />
+          {showForm ? "Cancel" : "Add"}
+        </Button>
+      </div>
+
+      {/* Add form (collapsible) */}
+      {showForm && (
+        <div className="px-4 py-4 bg-gray-50 border-b border-gray-100 shrink-0">
+          <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
+            <UserCircle className="w-3.5 h-3.5" />
+            New Staff Member
+          </h4>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(d => addMutation.mutate(d))} className="space-y-2.5">
+              <FormField control={form.control} name="name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Full Name</FormLabel>
+                  <FormControl><Input placeholder="Jane Smith" className="h-8 text-sm" {...field} /></FormControl>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="email" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Email</FormLabel>
+                  <FormControl><Input type="email" placeholder="jane@example.com" className="h-8 text-sm" {...field} /></FormControl>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )} />
+              <div className="grid grid-cols-2 gap-2">
+                <FormField control={form.control} name="password" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">Password</FormLabel>
+                    <FormControl><Input type="password" placeholder="Min 8 chars" className="h-8 text-sm" {...field} /></FormControl>
+                    <FormMessage className="text-xs" />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="confirmPassword" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">Confirm</FormLabel>
+                    <FormControl><Input type="password" placeholder="Repeat" className="h-8 text-sm" {...field} /></FormControl>
+                    <FormMessage className="text-xs" />
+                  </FormItem>
+                )} />
+              </div>
+              <FormField control={form.control} name="role" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Role</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select role" /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {addableRoles.map(r => (
+                        <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )} />
+              <Button type="submit" className="w-full h-8 text-sm" disabled={addMutation.isPending}>
+                {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Account"}
+              </Button>
+            </form>
+          </Form>
+        </div>
+      )}
+
+      {/* Staff list */}
+      {isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+      ) : staff.length === 0 ? (
+        <div className="text-center py-10 text-gray-400 px-4">
+          <Users className="w-7 h-7 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No staff yet</p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {staff.map(member => (
+            <li key={member.userId} className="px-4 py-3">
+              {/* Name + remove */}
+              <div className="flex items-start justify-between gap-2 mb-1">
                 <div className="min-w-0">
-                  <p className="text-sm text-gray-800 truncate">{member.email}</p>
-                  <span className={`inline-block text-xs px-1.5 py-0 rounded font-medium mt-0.5 ${ROLE_COLOURS[member.role] ?? "bg-gray-100 text-gray-600"}`}>
-                    {member.role}
-                  </span>
+                  <p className="text-sm font-medium text-gray-800 truncate">
+                    {member.name ?? <span className="text-gray-400 italic">No name</span>}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">{member.email}</p>
                 </div>
-                {member.role !== "owner" && member.userId !== sessionUserId && (
+                {canRemove(member) && (
                   <button
                     onClick={() => removeMutation.mutate(member.userId)}
                     disabled={removeMutation.isPending}
-                    className="shrink-0 text-gray-400 hover:text-red-500 transition-colors p-1 rounded"
-                    title="Remove staff member"
+                    className="shrink-0 text-gray-300 hover:text-red-500 transition-colors p-1 rounded mt-0.5"
+                    title="Remove from restaurant"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Add staff form */}
-      <div className="border-t border-gray-100 pt-4">
-        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-1.5">
-          <UserCircle className="w-4 h-4 text-gray-500" />
-          Add Staff Member
-        </h3>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(d => addMutation.mutate(d))} className="space-y-3">
-            <FormField control={form.control} name="email" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Email</FormLabel>
-                <FormControl><Input type="email" placeholder="staff@example.com" className="h-8 text-sm" {...field} /></FormControl>
-                <FormMessage className="text-xs" />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="password" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Password</FormLabel>
-                <FormControl><Input type="password" placeholder="Min. 8 characters" className="h-8 text-sm" {...field} /></FormControl>
-                <FormMessage className="text-xs" />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="role" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Role</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value}>
-                  <FormControl>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select role" /></SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="employee">Employee</SelectItem>
-                    <SelectItem value="driver">Driver</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage className="text-xs" />
-              </FormItem>
-            )} />
-            <Button type="submit" className="w-full h-8 text-sm" disabled={addMutation.isPending}>
-              {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add Staff Member"}
-            </Button>
-          </form>
-        </Form>
-      </div>
+              </div>
+              {/* Role editor + joined date */}
+              <div className="flex items-center justify-between gap-2">
+                <RoleEditor
+                  member={member}
+                  sessionRole={sessionRole}
+                  sessionUserId={sessionUserId}
+                  restaurantSlug={restaurantSlug}
+                />
+                <span className="text-xs text-gray-400 shrink-0">
+                  Joined {formatMemberDate(member.createdAt)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -838,7 +993,7 @@ function StaffSidebar({
 
       {activeTab === "staff" && canManageStaff && (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <ManageStaffTab restaurantSlug={restaurantSlug} sessionUserId={session.userId} />
+          <ManageStaffTab restaurantSlug={restaurantSlug} sessionUserId={session.userId} sessionRole={session.role} />
         </div>
       )}
 
