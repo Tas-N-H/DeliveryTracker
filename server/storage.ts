@@ -51,6 +51,7 @@ export interface IStorage {
   assignOrderToDriver(restaurantId: number, orderId: number, driverId: number | null): Promise<Order | undefined>;
   markRestaurantOrderDelivered(restaurantId: number, orderId: number): Promise<boolean>;
   getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]>;
+  getRestaurantDeliveredOrders(restaurantId: number): Promise<(DeliveredOrder & { driverEmail: string | null })[]>;
   getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
 
   // Staff management
@@ -267,17 +268,42 @@ export class DatabaseStorage implements IStorage {
     if (!order) return false;
 
     await db.insert(deliveredOrders).values({
-      restaurantId: order.restaurantId,
-      orderNumber: order.orderNumber,
-      address: order.address,
-      platform: order.platform,
-      latitude: order.latitude,
-      longitude: order.longitude,
-      originalOrderId: order.id,
+      restaurantId:     order.restaurantId,
+      orderNumber:      order.orderNumber,
+      address:          order.address,
+      platform:         order.platform,
+      latitude:         order.latitude,
+      longitude:        order.longitude,
+      assignedDriverId: order.assignedDriverId ?? null,
+      originalOrderId:  order.id,
     });
 
     await this.deleteOrder(order.id);
     return true;
+  }
+
+  async getRestaurantDeliveredOrders(
+    restaurantId: number,
+  ): Promise<(DeliveredOrder & { driverEmail: string | null })[]> {
+    const rows = await db
+      .select({
+        id:               deliveredOrders.id,
+        restaurantId:     deliveredOrders.restaurantId,
+        orderNumber:      deliveredOrders.orderNumber,
+        address:          deliveredOrders.address,
+        platform:         deliveredOrders.platform,
+        latitude:         deliveredOrders.latitude,
+        longitude:        deliveredOrders.longitude,
+        assignedDriverId: deliveredOrders.assignedDriverId,
+        deliveredAt:      deliveredOrders.deliveredAt,
+        originalOrderId:  deliveredOrders.originalOrderId,
+        driverEmail:      users.email,
+      })
+      .from(deliveredOrders)
+      .leftJoin(users, eq(deliveredOrders.assignedDriverId, users.id))
+      .where(eq(deliveredOrders.restaurantId, restaurantId))
+      .orderBy(deliveredOrders.deliveredAt);
+    return rows.map(r => ({ ...r, driverEmail: r.driverEmail ?? null }));
   }
 
   async getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]> {

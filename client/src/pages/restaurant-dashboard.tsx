@@ -52,9 +52,13 @@ import {
   ShieldCheck,
   UserCircle,
   Save,
+  History,
+  User,
 } from "lucide-react";
 import { SiUbereats, SiJusteat } from "react-icons/si";
-import type { Order } from "@shared/schema";
+import type { Order, DeliveredOrder } from "@shared/schema";
+
+type DeliveredOrderWithDriver = DeliveredOrder & { driverEmail: string | null };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -585,9 +589,84 @@ function SettingsTab({
   );
 }
 
+// ── Delivered History Tab ─────────────────────────────────────────────────────
+
+function formatDeliveredAt(ts: string | Date) {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return `${time} · ${date}`;
+}
+
+function DeliveredHistoryTab({ restaurantSlug }: { restaurantSlug: string }) {
+  const { data: history = [], isLoading } = useQuery<DeliveredOrderWithDriver[]>({
+    queryKey: [`/api/${restaurantSlug}/orders/delivered`],
+    refetchInterval: 60000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-10">
+        <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (history.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-400 px-4">
+        <History className="w-8 h-8 mx-auto mb-2 opacity-30" />
+        <p className="text-sm">No delivered orders yet</p>
+        <p className="text-xs mt-1">Completed deliveries will appear here</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-y-auto h-full">
+      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 shrink-0">
+        <p className="text-xs text-gray-500">{history.length} order{history.length !== 1 ? "s" : ""} total</p>
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {[...history].reverse().map(order => (
+          <li key={order.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
+            {/* Top row: order number + timestamp */}
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                <PlatformIcon platform={order.platform} />
+                <span className="text-xs font-semibold text-gray-700">#{order.orderNumber}</span>
+              </div>
+              <span className="text-xs text-gray-400">{formatDeliveredAt(order.deliveredAt)}</span>
+            </div>
+
+            {/* Address */}
+            <div className="flex items-start gap-1.5 mb-1">
+              <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-gray-600 leading-snug line-clamp-2">{order.address}</p>
+            </div>
+
+            {/* Platform + driver */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">{formatPlatform(order.platform)}</span>
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <User className="w-3 h-3" />
+                {order.driverEmail
+                  ? <span className="max-w-[120px] truncate">{order.driverEmail}</span>
+                  : <span className="italic">Unassigned</span>
+                }
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ── Staff Sidebar ─────────────────────────────────────────────────────────────
 
-type SidebarTab = "orders" | "staff" | "settings";
+type SidebarTab = "orders" | "delivered" | "staff" | "settings";
 
 function StaffSidebar({
   session,
@@ -626,14 +705,16 @@ function StaffSidebar({
   const transit = orders.filter(o => o.status === "in-transit").length;
 
   const roleLabel = session.role.charAt(0).toUpperCase() + session.role.slice(1);
-  const canManageStaff = session.role === "owner" || session.role === "manager";
+  const canManageStaff    = session.role === "owner" || session.role === "manager";
+  const canViewDelivered  = session.role === "owner" || session.role === "manager";
   const canManageSettings = session.role === "owner";
 
   // Tab definitions
   const tabs: { id: SidebarTab; label: string; icon: React.ReactNode }[] = [
-    { id: "orders",   label: "Orders",   icon: <UtensilsCrossed className="w-3.5 h-3.5" /> },
-    ...(canManageStaff    ? [{ id: "staff"    as SidebarTab, label: "Staff",    icon: <Users className="w-3.5 h-3.5" /> }] : []),
-    ...(canManageSettings ? [{ id: "settings" as SidebarTab, label: "Settings", icon: <Settings className="w-3.5 h-3.5" /> }] : []),
+    { id: "orders",    label: "Orders",    icon: <UtensilsCrossed className="w-3.5 h-3.5" /> },
+    ...(canViewDelivered  ? [{ id: "delivered" as SidebarTab, label: "Delivered", icon: <History className="w-3.5 h-3.5" /> }] : []),
+    ...(canManageStaff    ? [{ id: "staff"     as SidebarTab, label: "Staff",     icon: <Users className="w-3.5 h-3.5" /> }] : []),
+    ...(canManageSettings ? [{ id: "settings"  as SidebarTab, label: "Settings",  icon: <Settings className="w-3.5 h-3.5" /> }] : []),
   ];
 
   return (
@@ -747,6 +828,12 @@ function StaffSidebar({
             />
           </div>
         </>
+      )}
+
+      {activeTab === "delivered" && canViewDelivered && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <DeliveredHistoryTab restaurantSlug={restaurantSlug} />
+        </div>
       )}
 
       {activeTab === "staff" && canManageStaff && (

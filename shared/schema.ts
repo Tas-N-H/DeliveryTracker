@@ -26,6 +26,7 @@ export const deliveredOrders = pgTable("delivered_orders", {
   platform: text("platform").notNull(),
   latitude: text("latitude"),
   longitude: text("longitude"),
+  assignedDriverId: integer("assigned_driver_id"),
   deliveredAt: timestamp("delivered_at").defaultNow().notNull(),
   originalOrderId: integer("original_order_id").notNull(),
 });

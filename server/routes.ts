@@ -219,6 +219,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
+  // GET /api/:restaurantSlug/orders/delivered  (full history — owner + manager)
+  app.get("/api/:restaurantSlug/orders/delivered",
+    requireRestaurantSession,
+    requirePermission("view_analytics"),
+    async (req, res) => {
+      try {
+        const { restaurantId } = req.session.restaurantSession!;
+        const delivered = await storage.getRestaurantDeliveredOrders(restaurantId);
+        res.json(delivered);
+      } catch (error) {
+        console.error("Error fetching delivered order history:", error);
+        res.status(500).json({ message: "Failed to fetch delivered order history" });
+      }
+    }
+  );
+
   // GET /api/:restaurantSlug/orders
   app.get("/api/:restaurantSlug/orders",
     requireRestaurantSession,
