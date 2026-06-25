@@ -645,7 +645,7 @@ function ManageStaffTab({
               <div className="flex items-start justify-between gap-2 mb-1">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">
-                    {member.name ?? <span className="text-gray-400 italic">No name</span>}
+                    {member.name ?? member.email}
                   </p>
                   <p className="text-xs text-gray-500 truncate">{member.email}</p>
                 </div>

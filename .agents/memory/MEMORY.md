@@ -1,0 +1,1 @@
+- [tsx stale module cache](tsx-stale-module-cache.md) — editing a Drizzle schema mid-session without restarting tsx causes silently-omitted columns in INSERT queries.
