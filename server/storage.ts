@@ -41,7 +41,7 @@ export interface IStorage {
   // Driver sessions
   upsertDriverSession(driverId: number, restaurantId: number): Promise<DriverSession>;
   deactivateDriverSession(driverId: number, restaurantId: number): Promise<void>;
-  getActiveDrivers(restaurantId: number): Promise<{ driverId: number; email: string }[]>;
+  getActiveDrivers(restaurantId: number): Promise<{ driverId: number; name: string | null; email: string }[]>;
 
   // Restaurant-scoped orders
   getRestaurantOrders(restaurantId: number): Promise<Order[]>;
@@ -51,7 +51,7 @@ export interface IStorage {
   assignOrderToDriver(restaurantId: number, orderId: number, driverId: number | null): Promise<Order | undefined>;
   markRestaurantOrderDelivered(restaurantId: number, orderId: number): Promise<boolean>;
   getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]>;
-  getRestaurantDeliveredOrders(restaurantId: number): Promise<(DeliveredOrder & { driverEmail: string | null })[]>;
+  getRestaurantDeliveredOrders(restaurantId: number): Promise<(DeliveredOrder & { driverName: string | null; driverEmail: string | null })[]>;
   getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
 
   // Staff management
@@ -207,10 +207,10 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
-  async getActiveDrivers(restaurantId: number): Promise<{ driverId: number; email: string }[]> {
+  async getActiveDrivers(restaurantId: number): Promise<{ driverId: number; name: string | null; email: string }[]> {
     const today = new Date().toISOString().slice(0, 10);
     const rows = await db
-      .select({ driverId: driverSessions.driverId, email: users.email })
+      .select({ driverId: driverSessions.driverId, name: users.name, email: users.email })
       .from(driverSessions)
       .innerJoin(users, eq(driverSessions.driverId, users.id))
       .where(
@@ -285,7 +285,7 @@ export class DatabaseStorage implements IStorage {
 
   async getRestaurantDeliveredOrders(
     restaurantId: number,
-  ): Promise<(DeliveredOrder & { driverEmail: string | null })[]> {
+  ): Promise<(DeliveredOrder & { driverName: string | null; driverEmail: string | null })[]> {
     const rows = await db
       .select({
         id:               deliveredOrders.id,
@@ -298,13 +298,14 @@ export class DatabaseStorage implements IStorage {
         assignedDriverId: deliveredOrders.assignedDriverId,
         deliveredAt:      deliveredOrders.deliveredAt,
         originalOrderId:  deliveredOrders.originalOrderId,
+        driverName:       users.name,
         driverEmail:      users.email,
       })
       .from(deliveredOrders)
       .leftJoin(users, eq(deliveredOrders.assignedDriverId, users.id))
       .where(eq(deliveredOrders.restaurantId, restaurantId))
       .orderBy(deliveredOrders.deliveredAt);
-    return rows.map(r => ({ ...r, driverEmail: r.driverEmail ?? null }));
+    return rows.map(r => ({ ...r, driverName: r.driverName ?? null, driverEmail: r.driverEmail ?? null }));
   }
 
   async getTodaysDeliveredRestaurantOrders(restaurantId: number): Promise<DeliveredOrder[]> {

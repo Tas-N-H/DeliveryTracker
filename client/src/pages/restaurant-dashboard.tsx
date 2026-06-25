@@ -58,7 +58,7 @@ import {
 import { SiUbereats, SiJusteat } from "react-icons/si";
 import type { Order, DeliveredOrder } from "@shared/schema";
 
-type DeliveredOrderWithDriver = DeliveredOrder & { driverEmail: string | null };
+type DeliveredOrderWithDriver = DeliveredOrder & { driverName: string | null; driverEmail: string | null };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +71,7 @@ interface RestaurantSession {
 
 interface ActiveDriver {
   driverId: number;
+  name: string | null;
   email: string;
 }
 
@@ -345,7 +346,7 @@ function StaffOrderCard({
                 <SelectItem value="none">Unassigned</SelectItem>
                 {drivers.map(d => (
                   <SelectItem key={d.driverId} value={d.driverId.toString()}>
-                    {d.email}
+                    {d.name ?? d.email}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -368,7 +369,7 @@ function StaffOrderCard({
       </div>
       {assignedDriver && !pendingChanged && (
         <p className="text-xs text-gray-500 mt-1">
-          <span className="text-gray-400">Driver:</span> {assignedDriver.email}
+          <span className="text-gray-400">Driver:</span> {assignedDriver.name ?? assignedDriver.email}
         </p>
       )}
     </div>
@@ -806,8 +807,8 @@ function DeliveredHistoryTab({ restaurantSlug }: { restaurantSlug: string }) {
               <span className="text-xs text-gray-400">{formatPlatform(order.platform)}</span>
               <div className="flex items-center gap-1 text-xs text-gray-400">
                 <User className="w-3 h-3" />
-                {order.driverEmail
-                  ? <span className="max-w-[120px] truncate">{order.driverEmail}</span>
+                {(order.driverName ?? order.driverEmail)
+                  ? <span className="max-w-[120px] truncate">{order.driverName ?? order.driverEmail}</span>
                   : <span className="italic">Unassigned</span>
                 }
               </div>
