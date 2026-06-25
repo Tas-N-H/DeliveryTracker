@@ -1,0 +1,115 @@
+Add a proper restaurant-specific Staff ID system to the Staff Management section.
+
+Current issue:
+The app currently uses internal database IDs such as users.id or restaurant_users.id. These are not proper employee/staff IDs and should not be shown as staff identifiers.
+
+Goal:
+Add a proper staff_code for every staff member, scoped to each restaurant.
+
+Important:
+Do not touch the map, active orders, delivered orders, driver assignment, driver delivery workflow, or unrelated UI.
+
+Requirements:
+
+1. Database change
+
+Add a new column to restaurant_users:
+
+* staff_code text
+
+Add a uniqueness rule so staff_code cannot duplicate within the same restaurant.
+
+The existing restaurant_users.id should remain as the internal database ID only.
+
+2. Staff code format
+
+Generate staff codes automatically using the restaurant slug and staff role.
+
+Examples:
+
+* china-village owner: CV-OWN-0001
+* china-village manager: CV-MGR-0001
+* china-village employee: CV-EMP-0001
+* china-village driver: CV-DRV-0001
+* mums-thai-faversham driver: MTF-DRV-0001
+
+Restaurant prefix rules:
+
+* Use initials from the restaurant slug.
+* china-village → CV
+* mums-thai-faversham → MTF
+
+Role abbreviation rules:
+
+* owner → OWN
+* manager → MGR
+* employee → EMP
+* driver → DRV
+
+3. Sequencing rules
+
+* Each restaurant must have its own staff code sequence.
+* Numbering should be per role if possible.
+* Do not reuse a staff code after deletion.
+* Existing staff must be backfilled with staff_code values.
+* New staff created from the Staff tab must automatically receive a staff_code.
+
+4. Staff creation
+
+When a new staff member is created:
+
+* Create the user as normal.
+* Link the user to the current restaurant in restaurant_users.
+* Generate and save the staff_code automatically.
+* Return the staff_code in the API response.
+
+5. Staff list API
+
+Update the staff list endpoint so each staff member returns:
+
+* staff_code
+* name
+* email
+* role
+* created_at
+
+6. Staff tab UI
+
+Update the Staff tab list so it clearly displays:
+
+* Staff ID / staff_code
+* Name
+* Email
+* Role
+* Created date
+* Allowed actions
+
+Example display:
+
+CV-DRV-0001
+JJ Smith
+[jsmith@chinavillage.com](mailto:jsmith@chinavillage.com)
+Driver
+
+7. Backfill existing staff
+
+For existing restaurant_users rows:
+
+* Generate staff_code values for all existing staff.
+* Use each row’s restaurant slug and role.
+* Preserve existing user accounts, roles, and permissions.
+* Do not wipe existing users.
+
+8. Verification
+
+After implementation, test and clearly report:
+
+* Existing restaurant_users rows now have staff_code values.
+* New staff created from the Staff tab gets a staff_code automatically.
+* Staff code appears in the Staff tab.
+* Staff codes are unique within each restaurant.
+* Staff codes do not use restaurant_users.id directly.
+* Staff names still save and display correctly.
+* Driver names still display correctly in assignment dropdown, active orders, and delivered history.
+* Owner, manager, employee, and driver permissions still work.
+* Existing map, active orders, delivered orders, driver assignment, and driver delivery workflow still work.
