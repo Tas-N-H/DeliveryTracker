@@ -380,6 +380,7 @@ function StaffOrderCard({
 
 interface StaffMember {
   userId: number;
+  staffCode: string | null;
   name: string | null;
   email: string;
   role: string;
@@ -642,9 +643,14 @@ function ManageStaffTab({
         <ul className="divide-y divide-gray-100">
           {staff.map(member => (
             <li key={member.userId} className="px-4 py-3">
-              {/* Name + remove */}
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <div className="min-w-0">
+              {/* Staff ID badge + remove */}
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <div className="min-w-0 flex-1">
+                  {member.staffCode && (
+                    <span className="inline-block font-mono text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 mb-1 tracking-wide">
+                      {member.staffCode}
+                    </span>
+                  )}
                   <p className="text-sm font-medium text-gray-800 truncate">
                     {member.name ?? member.email}
                   </p>

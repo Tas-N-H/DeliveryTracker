@@ -1,0 +1,107 @@
+Continue the restaurant-specific Staff ID system from the last interrupted session.
+
+The previous session stopped because the Replit quota was reached while starting implementation. Do not assume the feature completed.
+
+First inspect the current state before making changes.
+
+Check:
+
+1. Database state
+
+* Does restaurant_users already have a staff_code column?
+* Does restaurant_users already have a unique constraint for staff_code per restaurant?
+* Were existing restaurant_users rows already backfilled with staff_code values?
+* Are there any null, duplicate, or partially generated staff_code values?
+
+2. Code state
+
+* Does shared/schema.ts include restaurant_users.staff_code?
+* Does storage.ts generate staff_code when creating staff?
+* Does the staff list query return staff_code?
+* Does the Staff tab UI display staff_code?
+* Are there any half-finished changes or TypeScript errors?
+
+After inspection:
+
+If the feature is incomplete, finish it safely.
+
+If some changes were already partially completed, continue from the current state without duplicating columns, constraints, or backfilled codes.
+
+Requirements:
+
+1. Database
+   Add staff_code to restaurant_users if it does not already exist.
+
+Add a uniqueness rule so staff_code cannot duplicate within the same restaurant.
+
+Backfill all existing restaurant_users rows with staff_code values.
+
+2. Staff code format
+   Generate staff codes using restaurant slug initials and role abbreviation.
+
+Examples:
+
+* china-village owner: CV-OWN-0001
+* china-village manager: CV-MGR-0001
+* china-village employee: CV-EMP-0001
+* china-village driver: CV-DRV-0001
+* mums-thai-faversham driver: MTF-DRV-0001
+
+Restaurant prefix examples:
+
+* china-village → CV
+* mums-thai-faversham → MTF
+
+Role abbreviations:
+
+* owner → OWN
+* manager → MGR
+* employee → EMP
+* driver → DRV
+
+3. Sequencing
+
+* Each restaurant has its own staff code sequence.
+* Numbering should be per role if possible.
+* Do not reuse staff codes after deletion.
+* New staff created from the Staff tab must automatically receive a staff_code.
+* Existing staff must be backfilled without wiping users or changing roles.
+
+4. Backend
+   Update the staff creation path so restaurant_users.staff_code is generated and saved automatically.
+
+Update the staff list endpoint so each staff member returns:
+
+* staff_code
+* name
+* email
+* role
+* created_at
+
+5. Frontend
+   Update the Staff tab list so it clearly displays:
+
+* Staff ID / staff_code
+* Name
+* Email
+* Role
+* Created date
+* Allowed actions
+
+6. Verification
+   After implementation, clearly report:
+
+* Whether staff_code column already existed or was newly added
+* Whether backfill was completed
+* Example staff_code values for existing staff
+* New staff created from the Staff tab gets a staff_code automatically
+* Staff tab displays staff_code correctly
+* Staff codes are unique within each restaurant
+* Staff codes do not use restaurant_users.id directly
+* Staff names still save and display correctly
+* Driver names still display correctly in assignment dropdown, active orders, and delivered history
+* Owner, manager, employee, and driver permissions still work
+* Existing map, active orders, delivered orders, driver assignment, and driver delivery workflow still work
+
+Important:
+Do not touch the map, active orders, delivered orders, driver assignment, driver delivery workflow, or unrelated UI.

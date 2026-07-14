@@ -16,6 +16,49 @@ import {
 import { db } from "./db";
 import { eq, gte, and } from "drizzle-orm";
 
+// ── Staff code generation ────────────────────────────────────────────────────
+
+function slugToPrefix(slug: string): string {
+  return slug
+    .split("-")
+    .map((w) => w[0])
+    .filter((c): c is string => !!c && /[a-zA-Z]/.test(c))
+    .join("")
+    .toUpperCase();
+}
+
+const ROLE_ABBR: Record<string, string> = {
+  owner: "OWN",
+  manager: "MGR",
+  employee: "EMP",
+  driver: "DRV",
+};
+
+async function nextStaffCode(
+  restaurantId: number,
+  slug: string,
+  role: string,
+): Promise<string> {
+  const prefix    = slugToPrefix(slug);
+  const roleAbbr  = ROLE_ABBR[role] ?? role.toUpperCase().slice(0, 3);
+  const codePrefix = `${prefix}-${roleAbbr}-`;
+
+  const existing = await db
+    .select({ staffCode: restaurantUsers.staffCode })
+    .from(restaurantUsers)
+    .where(eq(restaurantUsers.restaurantId, restaurantId));
+
+  let maxSeq = 0;
+  for (const row of existing) {
+    const code = row.staffCode;
+    if (code?.startsWith(codePrefix)) {
+      const seq = parseInt(code.slice(codePrefix.length), 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    }
+  }
+  return `${codePrefix}${String(maxSeq + 1).padStart(4, "0")}`;
+}
+
 export interface IStorage {
   // Orders (main app – Replit auth)
   getOrders(): Promise<Order[]>;
@@ -55,8 +98,8 @@ export interface IStorage {
   getDriverOrders(restaurantId: number, driverId: number): Promise<Order[]>;
 
   // Staff management
-  getRestaurantStaff(restaurantId: number): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }[]>;
-  addStaffMember(restaurantId: number, params: { name: string; email: string; passwordHash: string; role: string }): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }>;
+  getRestaurantStaff(restaurantId: number): Promise<{ userId: number; staffCode: string | null; name: string | null; email: string; role: string; createdAt: Date }[]>;
+  addStaffMember(restaurantId: number, params: { name: string; email: string; passwordHash: string; role: string }): Promise<{ userId: number; staffCode: string | null; name: string | null; email: string; role: string; createdAt: Date }>;
   removeStaffMember(restaurantId: number, userId: number): Promise<boolean>;
   updateStaffRole(restaurantId: number, userId: number, role: string): Promise<boolean>;
 
@@ -340,10 +383,11 @@ export class DatabaseStorage implements IStorage {
 
   async getRestaurantStaff(
     restaurantId: number,
-  ): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }[]> {
+  ): Promise<{ userId: number; staffCode: string | null; name: string | null; email: string; role: string; createdAt: Date }[]> {
     return await db
       .select({
         userId:    users.id,
+        staffCode: restaurantUsers.staffCode,
         name:      users.name,
         email:     users.email,
         role:      restaurantUsers.role,
@@ -358,7 +402,15 @@ export class DatabaseStorage implements IStorage {
   async addStaffMember(
     restaurantId: number,
     { name, email, passwordHash, role }: { name: string; email: string; passwordHash: string; role: string },
-  ): Promise<{ userId: number; name: string | null; email: string; role: string; createdAt: Date }> {
+  ): Promise<{ userId: number; staffCode: string | null; name: string | null; email: string; role: string; createdAt: Date }> {
+    const [restaurant] = await db
+      .select({ slug: restaurants.slug })
+      .from(restaurants)
+      .where(eq(restaurants.id, restaurantId));
+    if (!restaurant) throw new Error("Restaurant not found");
+
+    const staffCode = await nextStaffCode(restaurantId, restaurant.slug, role);
+
     return await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(users).where(eq(users.email, email));
       if (existing) {
@@ -369,12 +421,18 @@ export class DatabaseStorage implements IStorage {
         if (membership) {
           throw Object.assign(new Error("Already a staff member at this restaurant"), { code: "ALREADY_MEMBER" });
         }
-        await tx.insert(restaurantUsers).values({ userId: existing.id, restaurantId, role: role as any });
-        return { userId: existing.id, name: existing.name, email: existing.email, role, createdAt: existing.createdAt };
+        const [ru] = await tx
+          .insert(restaurantUsers)
+          .values({ userId: existing.id, restaurantId, role: role as any, staffCode })
+          .returning();
+        return { userId: existing.id, staffCode: ru.staffCode, name: existing.name, email: existing.email, role, createdAt: existing.createdAt };
       }
       const [newUser] = await tx.insert(users).values({ name, email, passwordHash }).returning();
-      await tx.insert(restaurantUsers).values({ userId: newUser.id, restaurantId, role: role as any });
-      return { userId: newUser.id, name: newUser.name, email: newUser.email, role, createdAt: newUser.createdAt };
+      const [ru] = await tx
+        .insert(restaurantUsers)
+        .values({ userId: newUser.id, restaurantId, role: role as any, staffCode })
+        .returning();
+      return { userId: newUser.id, staffCode: ru.staffCode, name: newUser.name, email: newUser.email, role, createdAt: newUser.createdAt };
     });
   }
 

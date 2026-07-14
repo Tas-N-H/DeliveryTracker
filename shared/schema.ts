@@ -69,7 +69,10 @@ export const restaurantUsers = pgTable("restaurant_users", {
     .notNull()
     .references(() => restaurants.id),
   role: restaurantRoleEnum("role").notNull(),
-});
+  staffCode: text("staff_code"),
+}, (t) => [
+  unique("restaurant_users_restaurant_id_staff_code_unique").on(t.restaurantId, t.staffCode),
+]);
 
 // Driver availability sessions
 export const driverSessions = pgTable("driver_sessions", {
